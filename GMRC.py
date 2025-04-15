@@ -1,0 +1,732 @@
+import numpy as np
+import matplotlib.pyplot as plt
+from scipy.optimize import minimize
+from shapely import STRtree
+from shapely.geometry import Polygon, box
+
+from TMRC import TMRC
+
+# Geometrical Modular Robot Configuration
+# Also consider "direction" for the first time after TMRC
+# Convention: alpha: head starting angle; beta: bend angle; gamma: grasp angle
+class GMRC(TMRC):
+    mdl_ang_cap = np.pi         # 180 degree, must be in (0, 180)
+    grsp_ang_cap = 2            # 115 degree, must be in (0, 180)
+    grsp_identifier_2_id = [0, 2, 1]
+
+    radius_ratio = 1 / 10       # The body radius ratio for a module
+
+    num_seg_lens = 5            # Number of line segments for a module
+    _mdl_seg_lens = np.array([126.383, 58, 58, 58, 126.383], dtype=np.float64)
+    mdl_seg_lens = _mdl_seg_lens / np.sum(_mdl_seg_lens)    # Five segments
+
+    # place (i, r): r position of segment i
+    text_place = [(0, 0.3), (2, 0.5), (4, 0.7)]
+    plg_axs_place = [(0, 0.77), (1, 0.5), (2, 0.5), (3, 0.5), (4, 0.23)]
+
+    def __init__(self, tmrc, bending_angles = None, grasping_angles = None, 
+                 module_polarities = None, loop_polarities = None, 
+                 grip_polarities = None):
+        assert isinstance(tmrc, TMRC)
+        super().__init__(
+            tmrc.w,
+            tmrc.v,
+            tmrc.n,
+            tmrc.m,
+            tmrc.grippers,
+            tmrc.gripper2module,
+            tmrc.module2gripper,
+            tmrc.rng,
+            tmrc.c,
+            tmrc.G,
+            tmrc.mdl_cycles,
+            tmrc.grip_cycles,
+            tmrc.real_cycles,
+            tmrc.is_grip_w)
+
+        self.module_loops = [self.get_module_loop(c) for c in self.real_cycles]
+        self.module_ht_loops = [self.get_module_ht_loop(c) for c in self.real_cycles]
+
+        self.grasp_loops = [self.get_grasp_loop(c) for c in self.real_cycles]
+        self.grasp_dir_loops = [self.get_grasp_dir_loop(l) for l in self.grasp_loops]
+
+        if (module_polarities is None 
+            or loop_polarities is None 
+            or grip_polarities is None):
+            self.module_polarities, self.loop_polarities, self.grip_polarities = \
+                self.get_polarities()
+        else:
+            self.module_polarities = module_polarities
+            self.loop_polarities = loop_polarities
+            self.grip_polarities = grip_polarities
+
+        # NOTE: All ancillary properties are here to use for angle optimization
+        # Number of different objects forming all loops
+        self.number_module_in_loop = 0
+        self.number_grasp_in_loop = 0   # Even the outgoing grasp attached to loop
+        # Boundaries for x during optimization
+        self.x_boundary = []    # A list of tutples of boundaries
+        # From x index to bend_angs index or grsp_angs index
+        self.xi2angi = []       # A list from x index to bend_angs or grsp_angs index
+        # Relative properties for dealing with w-grip angle constraints
+        self.xi_wf = []         # All the indexes for the first grasps of w-grip in x
+        self.wgpa_obj = []      # w-grip angle objective (360 for cc and 720 for c)
+        # All these lists have elements of int arrays, serving as indexes for np.array
+        self.ba_xi_loops = []   # A list of lists of indexes of x for bend_angs
+        self.ga_xi_loops = []   # A list of lists of indexes of x for grsp_angs
+        # All these lists have elements of np.array for accelerating optimizing
+        self.bas_loops = []     # The bend angle sign for each bend angle in loop
+        self.gas_loops = []     # The grasp angle sign for each grasp angle in loop
+
+        if bending_angles is None or grasping_angles is None:
+            cannot_be_docked = False
+            for try_collision_free in range(10):
+                if cannot_be_docked:
+                    break
+                self.bend_angs, self.grsp_angs = self.get_random_angles_da()
+                if len(self.module_loops) > 0:      # If the graph is not acyclic
+                    error = 1
+                    for try_docking_loops in range(10):
+                        x0 = self.initialize_x()    # Initialize all variables
+                        x0 = self.optim_angles_la(x0)
+                        x = self.optim_angles_ld(x0)
+                        error = self.get_loop_dock_error(x)
+                        if error > 1e-3:
+                            self.bend_angs, self.grsp_angs = self.get_random_angles_da()
+                        else:
+                            break                   # Until global minimized
+                    else:
+                        cannot_be_docked = True
+                        print('\033[91mFailed for Docking Loops :(\033[0m')
+                    self.update_angs_from_x(x)
+                # Format: {module_index: ((x, y), alpha, beta), ...}
+                self.module_geometries = {}         # The position, orientation of arcs
+                # Format: [(Bounding Box, Body Polygon), ...]
+                self.module_colliders = []          # The bounding box and body polygon
+                self.update_all_module_geometry()   # Update module_geometries
+                if not self.is_collision_detected():
+                    break                           # Until no collision
+            else:
+                print('\033[91mFailed for Finding Collision-Free Arrangement :(\033[0m')
+        else:
+            self.bend_angs = bending_angles
+            self.grsp_angs = grasping_angles
+            # Format: {module_index: ((x, y), alpha, beta)}
+            self.module_geometries = {}         # The position, orientation of arcs
+            # Format: [(Bounding Box, Body Polygon), ...]
+            self.module_colliders = []          # The bounding box and body polygon
+            self.update_all_module_geometry()   # Update module_geometries
+        
+        self.actions = self.get_all_actions()
+
+    # [m0, m1, ..., mc], if mi > 0 than it is from head to tail; otherwise tail to head
+    def get_module_loop(self, real_cycle):
+        module_loop = [0] * (len(real_cycle) // 3)
+        for i in range(len(module_loop)):
+            module_loop[i] = real_cycle[3 * i + 1]
+        return module_loop
+    
+    # Get module direction in a loop; 1: head to tail; -1: tail to head
+    def get_module_ht_loop(self, real_cycle):
+        module_ht_loop = [0] * (len(real_cycle) // 3)
+        for i in range(len(module_ht_loop)):
+            if self.gripper2module[real_cycle[3 * i]] % 2 == 0:     # If head to tail
+                module_ht_loop[i] = 1
+            else:
+                module_ht_loop[i] = -1
+        return module_ht_loop
+
+    # [(g1, g2), (g3, g4), ...], (g1, g2) is from gripper g1 to gripper g2
+    def get_grasp_loop(self, real_cycle):
+        grasp_loop = []
+        for i in range(len(real_cycle) // 3):
+            if i == 0:
+                gripper_1 = real_cycle[len(real_cycle) - 1]
+            else:
+                gripper_1 = real_cycle[3 * i - 1]
+            gripper_2 = real_cycle[3 * i]
+            grasp_loop.append((gripper_1, gripper_2))
+        return grasp_loop
+    
+    # Get grasp direction in a loop; 1: outer to inner; -1: inner to outer
+    def get_grasp_dir_loop(self, grasp_loop):
+        grasp_dir_loop = [0] * len(grasp_loop)
+        for i in range(len(grasp_loop)):
+            # If 0 -> 1 or 1 -> 2 or 2 -> 0
+            if grasp_loop[i][0] % 3 == (grasp_loop[i][1] - 1) % 3:
+                grasp_dir_loop[i] = 1
+            # If 0 -> 2 or 1 -> 0 or 2 -> 1
+            elif grasp_loop[i][0] % 3 == (grasp_loop[i][1] + 1) % 3:
+                grasp_dir_loop[i] = -1
+        return grasp_dir_loop
+    
+    # Module_P: how a module is participating in a loop
+    #   0: not in loop; 1: h-t in 360 loop or t-h in -360 loop; -1: otherwise
+    # Loop_P: whether a loop is counterclockwise or clockwise by the list order
+    #   0: to be decided; 1: 360 loop (counterclockwise); -1: -360 loop (clockwise)
+    # Grip_P: the arrangement of the three grippers in a w-grip
+    #   0: not in loop or is a v-grip
+    #   1: gripper_1 -> gripper_2 -> gripper_3 in counterclockwise direction
+    #   such that gamma_1 + gamma_2 + 180 ∈ [-115, 115] degrees
+    #   -1: # 1: gripper_1 -> gripper_2 -> gripper_3 in clockwise direction
+    #   such that gamma_1 + gamma_2 + 180 ∈ [245, 475] degrees
+    #   Reason: gamma_1 + 180 + gamma_2 + 180 + gamma_3 + 180 = 360 (cc) or 720 (c)
+    def get_polarities(self):
+        module_polarities = [0] * self.m
+        loop_polarities = [0] * self.c
+        grip_polarities = [0] * (self.w + self.v)
+        # Large cycles first
+        for i in reversed(range(len(self.module_loops))):
+            # Decide Loop Polarity
+            module_loop = self.module_loops[i]
+            for j in range(len(module_loop)):
+                module = module_loop[j]
+                # If the module already h-t in 360 or t-h in -360
+                if module_polarities[module] == 1:
+                    # Loop should be 360 for t-h or -360 for h-t
+                    loop_polarities[i] = -self.module_ht_loops[i][j]
+                    break
+                elif module_polarities[module] == -1:
+                    loop_polarities[i] = self.module_ht_loops[i][j]
+                    break
+            else:
+                loop_polarities[i] = 1          # Default loop polarity is 360
+            
+            # Decide Module Polarity
+            for j in range(len(module_loop)):   # Update module polarities
+                module = module_loop[j]
+                new_module_polarity = loop_polarities[i] * self.module_ht_loops[i][j]
+                if module_polarities[module] == 0:
+                    module_polarities[module] = new_module_polarity
+                elif not module_polarities[module] == new_module_polarity:
+                    module_polarities[module] = int(self.rng.choice([-1, 1], 1)[0])
+
+            # Decide Grip Polarity
+            for j in range(len(module_loop)):
+                grip = self.grip_cycles[i][2 * j + 1]
+                if self.is_grip_w[grip]:
+                    if grip_polarities[grip] == 0:
+                        module_1 = self.grip_cycles[i][2 * j]
+                        gripper_1 = self.get_gripper(module_1, grip) % 3
+                        module_2 = self.grip_cycles[i][2 * j + 2]
+                        gripper_2 = self.get_gripper(module_2, grip) % 3
+                        if gripper_2 == (gripper_1 + 1) % 3:
+                            grip_polarities[grip] = -loop_polarities[i]
+                        else:
+                            grip_polarities[grip] = loop_polarities[i]
+        for grip in range(self.w + self.v):
+            if self.is_grip_w[grip]:
+                if grip_polarities[grip] == 0:
+                    grip_polarities[grip] = int(self.rng.choice([-1, 1], 1)[0])
+
+        return module_polarities, loop_polarities, grip_polarities
+
+    # Generate random angles under dock-angle constraint
+    def get_random_angles_da(self):
+        bend_angs = self.rng.uniform(-GMRC.mdl_ang_cap, GMRC.mdl_ang_cap, self.m)
+        grsp_angs = np.zeros(len(self.grippers))
+        for grip in range(self.w + self.v):
+            if self.is_grip_w[grip]:
+                grsp_angs[3 * grip : 3 * (grip + 1)] = self.get_random_grip_angles(grip)
+            else:
+                grsp_angs[3 * grip] = self.rng.uniform(
+                    -GMRC.grsp_ang_cap, GMRC.grsp_ang_cap)
+        return bend_angs, grsp_angs
+    
+    # Initialize x from angles (self.bend_angs and self.grsp_angs)
+    def initialize_x(self):
+        nmil = 0
+        mi2xi = [-1] * self.m
+        self.ba_xi_loops = [np.zeros(len(module_loop), dtype=np.int64) 
+                            for module_loop in self.module_loops]
+        self.bas_loops = [np.array(module_ht_loop, dtype=np.float64) 
+                          for module_ht_loop in self.module_ht_loops]
+        for i in range(len(self.module_loops)):
+            module_loop = self.module_loops[i]
+            for j in range(len(module_loop)):
+                module = module_loop[j]
+                if mi2xi[module] < 0:
+                    mi2xi[module] = nmil
+                    self.ba_xi_loops[i][j] = nmil
+                    nmil = nmil + 1
+                else:
+                    self.ba_xi_loops[i][j] = mi2xi[module]
+        self.number_module_in_loop = nmil
+
+        nwgil = 0
+        nvgil = 0
+        gi2xi = [-1] * (self.w + self.v)    # w-grip to the first grasp index out of 3
+        self.ga_xi_loops = [np.zeros(len(grasp_loop), dtype=np.int64) 
+                            for grasp_loop in self.grasp_loops]
+        self.gas_loops = [np.array(grasp_dir_loop, dtype=np.float64) 
+                          for grasp_dir_loop in self.grasp_dir_loops]
+        for i in range(len(self.grasp_loops)):
+            grasp_loop = self.grasp_loops[i]
+            for j in range(len(grasp_loop)):
+                grasp = grasp_loop[j]
+                grip = grasp[0] // 3
+                if gi2xi[grip] < 0:
+                    gi2xi[grip] = nmil + 3 * nwgil + nvgil
+                    if self.is_grip_w[grip]:
+                        grasp_id = GMRC.grsp_identifier_2_id[
+                            grasp[0] % 3 + grasp[1] % 3 - 1]
+                        self.ga_xi_loops[i][j] = nmil + 3 * nwgil + nvgil + grasp_id
+                        nwgil = nwgil + 1
+                    else:
+                        self.ga_xi_loops[i][j] = nmil + 3 * nwgil + nvgil
+                        nvgil = nvgil + 1
+                else:
+                    if self.is_grip_w[grip]:
+                        grasp_id = GMRC.grsp_identifier_2_id[
+                            grasp[0] % 3 + grasp[1] % 3 - 1]
+                        self.ga_xi_loops[i][j] = gi2xi[grip] + grasp_id
+                    else:
+                        self.ga_xi_loops[i][j] = gi2xi[grip]
+        self.number_grasp_in_loop = 3 * nwgil + nvgil
+
+        self.x_boundary = [(-GMRC.mdl_ang_cap, GMRC.mdl_ang_cap)] \
+            * self.number_module_in_loop
+        self.x_boundary.extend([(-GMRC.grsp_ang_cap, GMRC.grsp_ang_cap)] \
+                               * self.number_grasp_in_loop)
+
+        x0 = np.zeros(nmil + 3 * nwgil + nvgil, dtype=np.float64)
+        self.xi2angi = np.zeros(nmil + 3 * nwgil + nvgil, dtype=np.int64)
+        for i in range(len(mi2xi)):
+            if mi2xi[i] >= 0:
+                x0[mi2xi[i]] = self.bend_angs[i]
+                self.xi2angi[mi2xi[i]] = i
+        self.xi_wf = []
+        self.wgpa_obj = []
+        for i in range(len(gi2xi)):             # i is the grip
+            if gi2xi[i] >= 0:
+                if self.is_grip_w[i]:
+                    self.xi_wf.append(gi2xi[i])
+                    # sum + 3 * 180 = 360 or 720 => sum = -180 or 180
+                    self.wgpa_obj.append(-self.grip_polarities[i] * np.pi)
+                    for j in range(3):
+                        x0[gi2xi[i] + j] = self.grsp_angs[3 * i + j]
+                        self.xi2angi[gi2xi[i] + j] = 3 * i + j
+                else:
+                    x0[gi2xi[i]] = self.grsp_angs[3 * i]
+                    self.xi2angi[gi2xi[i]] = 3 * i
+        return x0
+    
+    # Optimize angles to minimize loop-angle and w_grip_angle error
+    def optim_angles_la(self, x0):
+        if len(self.xi_wf) > 0:
+            constraints = [
+                {
+                    'type': 'eq', 
+                    'fun': self.get_w_grip_angle_error
+                }
+            ]
+        else:
+            constraints = []
+        result = minimize(
+            self.get_loop_angle_error, 
+            x0, 
+            method='SLSQP', 
+            constraints=constraints, 
+            bounds=self.x_boundary)
+        return result.x
+    
+    # Optimize angles to minimize loop-dock error
+    def optim_angles_ld(self, x0):
+        if len(self.xi_wf) > 0:
+            constraints = [
+                {
+                    'type': 'eq', 
+                    'fun': self.get_w_grip_angle_error
+                }, 
+                {
+                    'type': 'eq', 
+                    'fun': self.get_loop_angle_error
+                }
+            ]
+        else:
+            constraints = [
+                {
+                    'type': 'eq', 
+                    'fun': self.get_loop_angle_error
+                }
+            ]
+        result = minimize(
+            self.get_loop_dock_error, 
+            x0, 
+            method='SLSQP', 
+            constraints=constraints, 
+            bounds=self.x_boundary)
+        return result.x
+    
+    # Get w-grip angle error (from 360 or 720 depending on the direction)
+    def get_w_grip_angle_error(self, x):
+        error = 0.0
+        for i in range(len(self.xi_wf)):
+            j = self.xi_wf[i]
+            error = error + np.abs(x[j] + x[j + 1] + x[j + 2] - self.wgpa_obj[i])
+        return error
+
+    # Get loop-angle error for x
+    def get_loop_angle_error(self, x):
+        error = 0
+        for i in range(len(self.ba_xi_loops)):
+            error = error + np.abs(
+                np.sum(x[self.ba_xi_loops[i]] * self.bas_loops[i])
+                + np.sum(x[self.ga_xi_loops[i]] * self.gas_loops[i])
+                - self.loop_polarities[i] * 2 * np.pi)
+        return error
+
+    # Get loop-dock error for x
+    def get_loop_dock_error(self, x, is_print = False):
+        error = 0
+        for i in range(len(self.ba_xi_loops)):
+            betas = x[self.ba_xi_loops[i]] * self.bas_loops[i]
+            gammas = x[self.ga_xi_loops[i]] * self.gas_loops[i]
+
+            l = len(self.ba_xi_loops[i])
+            a = np.zeros((l, 1))
+            b = np.zeros((l, 1))
+            for j in range(GMRC.num_seg_lens):
+                cur_betas = betas / (GMRC.num_seg_lens - 1) * j
+                a = a + np.cos(cur_betas) * GMRC.mdl_seg_lens[j]
+                b = b + np.sin(cur_betas) * GMRC.mdl_seg_lens[j]
+            
+            beta_cml = np.cumsum(betas)
+            beta_cml = np.concatenate([np.array([0.0]), beta_cml[0 : l - 1]])
+            gamma_cml = np.cumsum(gammas) - gammas[0]
+            alphas = beta_cml + gamma_cml
+
+            delta_x = np.sum(a * np.cos(alphas) - b * np.sin(alphas))
+            delta_y = np.sum(a * np.sin(alphas) + b * np.cos(alphas))
+            error = error + np.sqrt(delta_x ** 2 + delta_y ** 2)
+            if is_print:
+                print('*********************')
+                print("Loop id: ", end='')
+                print(i)
+                print("Module angles: ", end='')
+                print(betas)
+                print("Grasp angles: ", end='')
+                print(gammas)
+                print("Starting angles: ", end='')
+                print(alphas)
+                print('Module a: ', end='')
+                print(a)
+                print('Module b: ', end='')
+                print(b)
+                print('Loop docking error: ', end='')
+                print((delta_x, delta_y))
+        if is_print:
+            print('*********************')
+            print('Total docking error: ', end='')
+            print(error)
+        return error
+    
+    # Update angles (self.bend_angs and self.grsp_angs) from x
+    def update_angs_from_x(self, x):
+        for i in range(self.number_module_in_loop):
+            self.bend_angs[self.xi2angi[i]] = x[i]
+        for i in range(self.number_module_in_loop, len(x)):
+            self.grsp_angs[self.xi2angi[i]] = x[i]
+
+    # Generate random angles for a w-grip with polarity
+    def get_random_grip_angles(self, grip):
+        # Range of the sum of gamma1 and gamma2
+        if self.grip_polarities[grip] == 1:
+            gamma_sum_min = -np.pi - GMRC.grsp_ang_cap
+            gamma_sum_max = -np.pi + GMRC.grsp_ang_cap
+        elif self.grip_polarities[grip] == -1:
+            gamma_sum_min = np.pi - GMRC.grsp_ang_cap
+            gamma_sum_max = np.pi + GMRC.grsp_ang_cap
+
+        gamma1_min = max(gamma_sum_min - GMRC.grsp_ang_cap, -GMRC.grsp_ang_cap)
+        gamma1_max = min(gamma_sum_max + GMRC.grsp_ang_cap, GMRC.grsp_ang_cap)
+        gamma1 = self.rng.uniform(gamma1_min, gamma1_max)
+
+        gamma2_min = max(gamma_sum_min - gamma1, -GMRC.grsp_ang_cap)
+        gamma2_max = min(gamma_sum_max - gamma1, GMRC.grsp_ang_cap)
+        gamma2 = self.rng.uniform(gamma2_min, gamma2_max)
+        
+        if self.grip_polarities[grip] == 1:
+            gamma3 = 2 * np.pi - (np.pi * 3) - gamma1 - gamma2  # 360 Constraint
+        elif self.grip_polarities[grip] == -1:
+            gamma3 = 4 * np.pi - (np.pi * 3) - gamma1 - gamma2  # 720 Constraint
+
+        return [gamma1, gamma2, gamma3]
+    
+    # Get direct neibor grippers for a gripper within a grip:
+    def get_gripper_grip_neighbors(self, g):
+        if self.grippers[g] == -2:
+            return []
+        grip = g // 3
+        if self.is_grip_w[grip]:
+            ggns = []
+            for i in range(3 * grip, 3 * grip + 3):
+                if not i == g and np.abs(i - g) < 2:            # With direct contact
+                    ggns.append(i)
+            return ggns
+        else:
+            return [grip * 3 + 1 - g % 3]
+    
+    # Get all neighbor grippers for a gripper, including its module neighbor in grips
+    # NOTE: Limb grippers (which does not participate in any grips are not considered)
+    def get_gripper_neighbors(self, g):
+        gns = self.get_gripper_grip_neighbors(g)
+        if self.grippers[g] >= 0:       # Only grippers in grips are considered
+            gns.append(int(self.grippers[g]))
+        return gns
+
+    # Get grasp angle from gripper_1 to gripper_2
+    def get_grasp_angle(self, g1, g2):
+        assert ((g1 // 3 == g2 // 3) and not (g1 == g2))
+        grip = g1 // 3
+        if self.is_grip_w[grip]:
+            # 0 -> 1, 1 -> 2, 2 -> 0
+            if (g1 + 1) % 3 == g2 % 3:
+                return self.grsp_angs[g1]
+            # 1 -> 0, 2 -> 1, 0 -> 2
+            else:
+                return -self.grsp_angs[g2]
+        else:
+            # 0 -> 1
+            if g1 < g2:
+                return self.grsp_angs[g1]
+            else:
+                return -self.grsp_angs[g2]
+            
+    # Update geometries and colliders of all modules
+    def update_all_module_geometry(self):
+        self.mdl_geo_updated = [False] * self.m
+        self.module_geometries = {}
+        self.update_module_geometry(0, (0, 0), 0, 0)
+
+        self.module_colliders = []
+        for i in range(self.m):
+            self.module_colliders.append(
+                self.get_module_collider(self.module_geometries[i]))
+
+    # Update geometry recursively
+    def update_module_geometry(self, mi, sp, sa, ht):
+        if ht == 0:
+            ar = self.bend_angs[mi]
+        else:
+            ar = -self.bend_angs[mi]
+
+        angs, xy = GMRC.get_mdl_seg_geo(sp, sa, ar)
+        ep = (xy[GMRC.num_seg_lens, 0], xy[GMRC.num_seg_lens, 1])
+        ea = angs[len(angs) - 1]
+
+        if ht == 0:
+            ht_position = (sp, ep)                  # Head and tail positions
+            ht_angle = (sa + np.pi, ea)             # Head and tail angles
+        else:
+            ht_position = (ep, sp)
+            ht_angle = (ea, sa + np.pi)
+
+        self.module_geometries[int(mi)] = (
+            ht_position[0], 
+            ht_angle[0] - np.pi,                    # Growing angle is opposite to it 
+            self.bend_angs[mi]
+            )
+        self.mdl_geo_updated[mi] = True
+
+        for i in range(2):
+            if self.module2gripper[i][mi] >= 0: # If it participates in a grip
+                gripper = self.module2gripper[i][mi]
+                gns = self.get_gripper_grip_neighbors(gripper)  # Gripper Grip Neighbors
+                for gn in gns:
+                    mn = self.gripper2module[gn] // 2           # Module Neighbor
+                    mn_ht = self.gripper2module[gn] % 2
+                    if not self.mdl_geo_updated[mn]:
+                        mn_sp = ht_position[i]
+                        mn_sa = ht_angle[i] + self.get_grasp_angle(gripper, gn)
+                        self.update_module_geometry(mn, mn_sp, mn_sa, mn_ht)
+
+    # Get module collider, includinh bounding box and body polygon
+    def get_module_collider(self, geometry): 
+        angs, xy = GMRC.get_mdl_seg_geo(geometry[0], geometry[1], geometry[2])
+
+        num_axs_pts = len(GMRC.plg_axs_place)
+        inner_pts = np.zeros((num_axs_pts, 2))
+        outer_pts = np.zeros((num_axs_pts, 2))
+
+        for i in range(num_axs_pts):
+            seg_i = GMRC.plg_axs_place[i][0]
+            seg_r = GMRC.plg_axs_place[i][1]
+            inner_pts[i, 0] = xy[seg_i, 0] \
+                + np.cos(angs[seg_i]) * seg_r * GMRC.mdl_seg_lens[i] \
+                + np.sin(angs[seg_i]) * GMRC.radius_ratio
+            inner_pts[i, 1] = xy[seg_i, 1] \
+                + np.sin(angs[seg_i]) * seg_r * GMRC.mdl_seg_lens[i] \
+                - np.cos(angs[seg_i]) * GMRC.radius_ratio
+            outer_pts[i, 0] = xy[seg_i, 0] \
+                + np.cos(angs[seg_i]) * seg_r * GMRC.mdl_seg_lens[i] \
+                - np.sin(angs[seg_i]) * GMRC.radius_ratio
+            outer_pts[i, 1] = xy[seg_i, 1] \
+                + np.sin(angs[seg_i]) * seg_r * GMRC.mdl_seg_lens[i] \
+                + np.cos(angs[seg_i]) * GMRC.radius_ratio
+
+        shell = np.zeros((2 * num_axs_pts + 1, 2))
+        shell[0 : num_axs_pts, :] = inner_pts[:, :]
+        shell[num_axs_pts : 2 * num_axs_pts, :] = outer_pts[::-1, :]
+        shell[2 * num_axs_pts, :] = inner_pts[0, :]
+
+        polygon = Polygon(shell)
+        bounds = polygon.bounds
+        return (box(bounds[0], bounds[1], bounds[2], bounds[3]), polygon)
+
+    # Detect collision between all modules
+    def is_collision_detected(self):
+        bbxs = []
+        for i in range(self.m):
+            bbxs.append(self.module_colliders[i][0])
+        tree = STRtree(np.array(bbxs))
+        for i in range(self.m - 1):
+            neighbors = tree.query_nearest(self.module_colliders[i][0], exclusive=True)
+            for n in neighbors:
+                if self.module_colliders[i][1].intersects(self.module_colliders[n][1]):
+                    return True
+        return False
+
+    # Show w-grip modules
+    def show_w_grip_modules(self):
+        grip2modules = dict()
+        for grip in range(self.w + self.v):
+            if self.is_grip_w[grip]:
+                grip2modules[grip] = [
+                    int(self.gripper2module[3 * grip] // 2), 
+                    int(self.gripper2module[3 * grip + 1] // 2), 
+                    int(self.gripper2module[3 * grip + 2] // 2)
+                ]
+        print("Modules for w-grips are: ", end='')
+        print(grip2modules)
+
+    def show_geometry(self):
+        
+        fig, ax = plt.subplots(figsize=(10, 10))
+        ax.set_aspect('equal')
+        ax.axis('off')
+
+        for i in range(self.m):
+            g1n = f"H{self.module2gripper[0][i]}"
+            mn = f"{i}"
+            g2n = f"T{self.module2gripper[1][i]}"
+            GMRC.draw_module(
+                ax, 
+                self.module_geometries[i][0], 
+                self.module_geometries[i][1], 
+                self.module_geometries[i][2], 
+                g1n, 
+                mn, 
+                g2n
+            )
+            ax.plot(*self.module_colliders[i][1].exterior.xy, 
+                    color = 'b')
+    
+    # TODO: Find suggested polarity for a new born w-grip
+    def get_suggested_grip_polarity(self, g2m_f, g2m_t):
+        return 0.5
+
+    # Return: [(gf, gt, sp), ..., (gf, gt, sp), gb, ..., gb] 
+    # gf: 2 * module + ht, the docking starts from this gripper
+    # gt: 2 * module + ht, the docking goes to this gripper, which is be grasped by gf
+    # sp: suggested polarity, sp ∈ (0, 1), with probability sp the polarity will be 1
+    #   if is not w-grip, sp will simply be 0.5
+    # gb: 2 * module + ht, gripper to be broken
+    def get_all_actions(self):
+        actions = []
+        
+        # Find all branch ends and v-grips for a new docking action
+        # NOTE: It does not matter that who is inside, it only matters who is out-out
+        gfs = []
+        gts = []
+        for i in range(self.m):
+            for j in range(2):
+                if self.module2gripper[j][i] < 0:
+                    gfs.append(2 * i + j)
+        for i in range(self.w + self.v):
+            if not self.is_grip_w[i]:               # All v-grips can be catched
+                gts.append(int(self.gripper2module[3 * i + 1]))
+        for i in range(len(gfs)):
+            for j in range(i + 1, len(gfs)):        # Does not matter that who in inside
+                actions.append((gfs[i], gfs[j], 0.5))
+        for gf in gfs:
+            for gt in gts:
+                grip_from = self.module2gripper[1 - gf % 2][gf // 2] // 3
+                grip_to = self.module2gripper[gt % 2][gt // 2] // 3
+                if grip_from == grip_to:            # Can not grasp the self module
+                    continue
+                actions.append((gf, gt, self.get_suggested_grip_polarity(gf, gt)))
+
+        # DFS for finding directed bridges
+        gripper_neighbors = [[]] * len(self.grippers)
+        visited_time = [-1] * len(self.grippers)
+        lowest_time = [-1] * len(self.grippers)
+        for i in range(len(self.grippers)):
+            gripper_neighbors[i] = self.get_gripper_neighbors(i)
+        gripper_visited = [False] * len(self.grippers)
+        gcr = [True] * len(self.grippers)               # Whether can grippers release
+        def dfs_find_bridge(v, p, t, is_same_module):
+            if not is_same_module:
+                t = t + 1
+            visited_time[v] = t
+            lowest_time[v] = t
+            gripper_visited[v] = True
+            for to in gripper_neighbors[v]:
+                if to == p:                             # If going back to parent
+                    continue
+                else:
+                    if gripper_visited[to]:
+                        lowest_time[v] = min(lowest_time[v], visited_time[to])
+                    else:
+                        b = self.gripper2module[v] // 2 == self.gripper2module[to] // 2
+                        dfs_find_bridge(to, v, t, b)
+                        lowest_time[v] = min(lowest_time[v], lowest_time[to])
+                        if visited_time[v] < lowest_time[to]:
+                            gcr[max(v, to)] = False     # This gripper can't release
+        dfs_find_bridge(0, -1, 0, False)
+        for grip in range(self.w + self.v):
+            if self.is_grip_w[grip]:
+                gripper = 3 * grip + 2
+            else:
+                gripper = 3 * grip + 1
+            if gcr[gripper]:
+                actions.append(gripper)
+        return actions
+
+    # TODO: Also update actions here
+    def excecute_action(self, action):
+        pass
+
+    # Get all module segment end points and module segment starting angles
+    @staticmethod
+    def get_mdl_seg_geo(sp, alpha, beta):
+        angs = alpha + np.linspace(0, beta, GMRC.num_seg_lens)
+        xy = np.zeros((GMRC.num_seg_lens + 1, 2))
+        xy[:, 0] = xy[:, 0] + sp[0]
+        xy[:, 1] = xy[:, 1] + sp[1]
+        for i in range(GMRC.num_seg_lens):
+            xy[i + 1:, 0] = xy[i + 1:, 0] + np.cos(angs[i]) * GMRC.mdl_seg_lens[i]
+            xy[i + 1:, 1] = xy[i + 1:, 1] + np.sin(angs[i]) * GMRC.mdl_seg_lens[i]
+        return (angs, xy)
+
+    @staticmethod
+    # Input parameters: 
+    # axis, starting point, starting angle, arc radius
+    # gripper 1 name, module name, gripper 2 name, number of points
+    def draw_module(ax, sp, sa, ba, g1n, mn, g2n):
+        angs, xy = GMRC.get_mdl_seg_geo(sp, sa, ba)
+        ax.plot(xy[:, 0], xy[:, 1], '-k')
+
+        texts = [g1n, mn, g2n]
+        colors = ['red', 'blue', 'red']
+        for i in range(len(texts)):
+            seg_i = GMRC.text_place[i][0]
+            seg_r = GMRC.text_place[i][1]
+            x = xy[seg_i, 0] + np.cos(angs[seg_i]) * seg_r * GMRC.mdl_seg_lens[i]
+            y = xy[seg_i, 1] + np.sin(angs[seg_i]) * seg_r * GMRC.mdl_seg_lens[i]
+            ax.text(x, y, texts[i], 
+                    ha = 'center',
+                    va = 'center', 
+                    bbox=dict(boxstyle="round,pad=0.5", 
+                              facecolor=colors[i], 
+                              alpha=0.5))
