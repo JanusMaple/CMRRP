@@ -453,6 +453,16 @@ class GMRC(TMRC):
 
         return [gamma1, gamma2, gamma3]
     
+    # Get grip neighbors of a grip and also the connecting modules between them
+    # Return: [[mdl, grip], ..., [mdl, grip]], meaning it is connected by mdl to grip
+    def get_grip_neighbors_w_mdl(self, grip):
+        nwm = []
+        for g in range(3 * grip, 3 * grip + 3):
+            gn = self.grippers[g]
+            if gn >= 0:
+                nwm.append([int(self.gripper2module[g] // 2), int(gn // 3)])
+        return nwm
+
     # Get direct neibor grippers for a gripper within a grip:
     def get_gripper_grip_neighbors(self, g):
         if self.grippers[g] == -2:
@@ -624,38 +634,86 @@ class GMRC(TMRC):
     
     # TODO: Find suggested polarity for a new born w-grip
     def get_suggested_grip_polarity(self, g2m_f, g2m_t):
-        return 0.5
+        pass
 
-    # Return: [(gf, gt, sp), ..., (gf, gt, sp), gb, ..., gb] 
+    # Return: [(gf, gt, gp, sp), ..., (gf, gt, gp, sp), gb, ..., gb] 
     # gf: 2 * module + ht, the docking starts from this gripper
     # gt: 2 * module + ht, the docking goes to this gripper, which is be grasped by gf
-    # sp: suggested polarity, sp ∈ (0, 1), with probability sp the polarity will be 1
-    #   if is not w-grip, sp will simply be 0.5
+    # gp: grip_path [grip, module, grip, ..., module, grip]
+    #   The starting grip is the only neighbor of the leaf node gf
+    #   The end grip is non-leaf node gt or the only neighbor of the leaf node gt
+    # sp: suggested loop polarity (the probability for +1 polarity), sp ∈ (0, 1)
     # gb: 2 * module + ht, gripper to be broken
     def get_all_actions(self):
         actions = []
         
         # Find all branch ends and v-grips for a new docking action
         # NOTE: It does not matter that who is inside, it only matters who is out-out
-        gfs = []
-        gts = []
+        gfs = []            # All leaf node grippers
+        gvs = []            # All v-grip outside grippers
         for i in range(self.m):
             for j in range(2):
                 if self.module2gripper[j][i] < 0:
                     gfs.append(2 * i + j)
         for i in range(self.w + self.v):
             if not self.is_grip_w[i]:               # All v-grips can be catched
-                gts.append(int(self.gripper2module[3 * i + 1]))
+                gvs.append(int(self.gripper2module[3 * i + 1]))
+        # BFS for finding grip_paths as the shortest path connecting gf and gt
         for i in range(len(gfs)):
-            for j in range(i + 1, len(gfs)):        # Does not matter that who in inside
-                actions.append((gfs[i], gfs[j], 0.5))
-        for gf in gfs:
-            for gt in gts:
-                grip_from = self.module2gripper[1 - gf % 2][gf // 2] // 3
-                grip_to = self.module2gripper[gt % 2][gt // 2] // 3
-                if grip_from == grip_to:            # Can not grasp the self module
+            gf = gfs[i]
+            grip_start = self.module2gripper[1 - gf % 2][gf // 2] // 3
+
+            gts = []
+            gts.extend(gfs[i + 1:])                 # Truncated by half due to symmetry
+            # It is possible for duplicate elements in grip_ends
+            #   Case 1: A leaf node connected by a v-grip
+            #   Case 2: Two leaf nodes sharing the same w-grip as the base
+            grip_ends = [self.module2gripper[gt % 2][gt // 2] // 3 for gt in gts]
+            for gv in gvs:
+                grip_end = self.module2gripper[gv % 2][gv // 2] // 3
+                if grip_start == grip_end:
                     continue
-                actions.append((gf, gt, self.get_suggested_grip_polarity(gf, gt)))
+                gts.append(gv)
+                grip_ends.append(grip_end)
+           
+            gps = [None] * len(gts)
+            grip_path = [None] * (self.w + self.v)
+            grip_visited = [False] * (self.w + self.v)
+            grip_needs_visiting = [False] * (self.w + self.v)
+            num_gnv = 0             # Number of grippers that need visiting
+            for grip_end in grip_ends:
+                if not grip_needs_visiting[grip_end]:
+                    grip_needs_visiting[grip_end] = True
+                    num_gnv = num_gnv + 1
+            # TODO: Find all paths with consistent polarity
+            def bfs_find_paths(front, paths_to_front):
+                num_gvd = 0             # Number of grippers that have been visited
+                while True:
+                    # Update visiting status and path records based on current front
+                    for i in range(len(front)):
+                        grip = front[i]
+                        if grip_needs_visiting[grip]:
+                            grip_path[grip] = paths_to_front[i]
+                            num_gvd = num_gvd + 1
+                            if num_gvd >= num_gnv:
+                                return
+                        grip_visited[grip] = True
+                    # Update front and paths to all grips in front
+                    new_front = []
+                    new_paths_to_front = []
+                    for i in range(len(front)):
+                        grip = front[i]
+                        for mdl_grip in self.get_grip_neighbors_w_mdl(grip):
+                            if not grip_visited[mdl_grip[1]]:
+                                new_front.append(mdl_grip[1])
+                                new_path = paths_to_front[i] + mdl_grip
+                                new_paths_to_front.append(new_path)
+                    front = new_front
+                    paths_to_front = new_paths_to_front
+            if num_gnv > 0: bfs_find_paths([grip_start], [[grip_start]])
+            for i in range(len(gps)):
+                gps[i] = grip_path[grip_ends[i]]
+                actions.append((gf, gts[i], gps[i]))
 
         # DFS for finding directed bridges
         gripper_neighbors = [[]] * len(self.grippers)
