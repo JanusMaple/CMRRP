@@ -260,6 +260,38 @@ class TMRC:
             return self.module2gripper[0][module]
         else:
             return self.module2gripper[1][module]
+        
+    # Get grip neighbors of a grip and also the connecting modules between them
+    # Return: [[mdl, grip], ..., [mdl, grip]], meaning it is connected by mdl to grip
+    def get_grip_neighbors_w_mdl(self, grip):
+        nwm = []
+        for g in range(3 * grip, 3 * grip + 3):
+            gn = self.grippers[g]
+            if gn >= 0:
+                nwm.append([int(self.gripper2module[g] // 2), int(gn // 3)])
+        return nwm
+
+    # Get direct neibor grippers for a gripper within a grip:
+    def get_gripper_grip_neighbors(self, g):
+        if self.grippers[g] == -2:
+            return []
+        grip = g // 3
+        if self.is_grip_w[grip]:
+            ggns = []
+            for i in range(3 * grip, 3 * grip + 3):
+                if not i == g and np.abs(i - g) < 2:            # With direct contact
+                    ggns.append(i)
+            return ggns
+        else:
+            return [grip * 3 + 1 - g % 3]
+    
+    # Get all neighbor grippers for a gripper, including its module neighbor in grips
+    # NOTE: Limb grippers (which does not participate in any grips are not considered)
+    def get_gripper_neighbors(self, g):
+        gns = self.get_gripper_grip_neighbors(g)
+        if self.grippers[g] >= 0:       # Only grippers in grips are considered
+            gns.append(int(self.grippers[g]))
+        return gns
     
     @staticmethod
     def show_topology(G):                   # Draw the topology graph of an MRC
