@@ -9,7 +9,7 @@ class TMRC:
                  c = None, G = None, mdl_cycles = None, grip_cycles = None
                  , real_cycles = None, is_grip_w = None):
         """
-        Optimize bending and grasping angles for an MRC.
+        The topology of a configuration. Cycle basis will be found. 
 
         Parameters
         ----------
@@ -55,20 +55,20 @@ class TMRC:
         G: networkx.Multigraph
             A multigraph for the modular robot configuration \n
 
-        mdl_cycles: [cyc_list, cyc_list, ..., cyc_list]; size: (1, circuit_rank) \n
+        mdl_cycles: [cyc_list, cyc_list, ..., cyc_list]; size: (1, circuit_rank)
             cyc_list: [*grip, module, grip, module, ..., module. *grip] \n
             or: [*node, edge, node, edge, ..., edge, node] \n
 
-        grip_cycles: [cyc_list, cyc_list, ..., cyc_list]; size: (1, circuit_rank) \n
+        grip_cycles: [cyc_list, cyc_list, ..., cyc_list]; size: (1, circuit_rank)
             cyc_list: [*module, grip, module, grip, ..., grip, module] \n
             grip_cycles is basically mdl_cycles shifted by 1
 
-        real_cycles: [cyc_list, cyc_list, ..., cyc_list]; size: (1, circuit_rank) \n
+        real_cycles: [cyc_list, cyc_list, ..., cyc_list]; size: (1, circuit_rank)
             cyc_list: [int, int, ..., int], the size is (3 * m_c) \n
             m_c: The number of modules in the cycle \n
             It is [gripper, module, gripper] repeated for m_c times \n
         
-        is_grip_w: [bool, bool, ..., bool]; size: (w + v) \n
+        is_grip_w: [bool, bool, ..., bool]; size: (w + v)
             Whether a grip is a w-grip or not \n
         """
         self.w = w

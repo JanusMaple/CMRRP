@@ -180,12 +180,10 @@ class MRC:
                 gripper_available[grippers[idx_g]] = False
                 idx_m = idx_m + 1
             if idx_m >= m: break
-        
-        tmrc = TMRC(w, v, n, m, grippers, gripper2module, module2gripper, rng)
 
         # Random generate geometry from topology
         # NOTE: Only considering plane geometry for now
-        gmrc = GMRC(tmrc)
+        gmrc = GMRC(w, v, n, m, grippers, gripper2module, module2gripper, rng)
         
         # Grasp process to form an MRC
         Module.start_hacking()
@@ -225,19 +223,19 @@ class MRC:
             print(grippers)
             print("-----------------------------------------------------------------")
             print('Module to grippers are: ', end='')
-            print(tmrc.module2gripper)
+            print(gmrc.module2gripper)
             print("Grippers belong to module: ", end='')
-            print([int(i // 2) for i in tmrc.gripper2module])
+            print([int(i // 2) for i in gmrc.gripper2module])
             print("Grippers' head-tail conditions are: ", end='')
-            print([int(i % 2) for i in tmrc.gripper2module])
+            print([int(i % 2) for i in gmrc.gripper2module])
             print("-----------------------------------------------------------------")
-            TMRC.show_topology(tmrc.G)
+            TMRC.show_topology(gmrc.G)
             print("Module Cycles are: ", end='')
-            print(tmrc.mdl_cycles)
+            print(gmrc.mdl_cycles)
             print("Grip Cycles are: ", end='')
             print(gmrc.grip_cycles)
             print("Real Cycles are: ", end='')
-            print(tmrc.real_cycles)
+            print(gmrc.real_cycles)
             print("-----------------------------------------------------------------")
             print("Module Loops are: ", end='')
             print(gmrc.module_loops)
