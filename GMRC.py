@@ -1,4 +1,5 @@
 import numpy as np
+import networkx as nx
 import matplotlib.pyplot as plt
 from scipy.optimize import minimize
 from shapely import STRtree
@@ -79,11 +80,12 @@ class GMRC(TMRC):
         self.gas_loops = []     # The grasp angle sign for each grasp angle in loop
 
         if bending_angles is None or grasping_angles is None:
+            is_planar, embedding = nx.check_planarity(self.G)   # Must be planar
             cannot_be_docked = False
             for try_collision_free in range(10):
-                if cannot_be_docked:
-                    break
                 self.bend_angs, self.grsp_angs = self.get_random_angles_da()
+                if cannot_be_docked or not is_planar:
+                    break
                 if len(self.module_loops) > 0:      # If the graph is not acyclic
                     error = 1
                     for try_docking_loops in range(10):
@@ -97,7 +99,6 @@ class GMRC(TMRC):
                             break                   # Until global minimized
                     else:
                         cannot_be_docked = True
-                        print('\033[91mFailed for Docking Loops :(\033[0m')
                     self.update_angs_from_x(x)
                 # Format: {module_index: ((x, y), alpha, beta), ...}
                 self.module_geometries = {}         # The position, orientation of arcs
@@ -107,7 +108,12 @@ class GMRC(TMRC):
                 if not self.is_collision_detected():
                     break                           # Until no collision
             else:
-                print('\033[91mFailed for Finding Collision-Free Arrangement :(\033[0m')
+                if cannot_be_docked:
+                    print('\033[91mFailed for Docking Loops :(\033[0m')
+                elif not is_planar:
+                    print('\033[91mThe Graph is Not Planar :(\033[0m')
+                else:
+                    print('\033[91mFailed for Finding Collision-Free Layout :(\033[0m')
         else:
             self.bend_angs = bending_angles
             self.grsp_angs = grasping_angles
@@ -685,7 +691,6 @@ class GMRC(TMRC):
                 if not grip_needs_visiting[grip_end]:
                     grip_needs_visiting[grip_end] = True
                     num_gnv = num_gnv + 1
-            # TODO: Find all paths with consistent polarity
             def bfs_find_paths(front, paths_to_front):
                 num_gvd = 0             # Number of grippers that have been visited
                 while True:
