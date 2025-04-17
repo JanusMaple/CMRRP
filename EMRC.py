@@ -93,17 +93,8 @@ class EMRC(TMRC):
                 grasp_dir_loop[i] = -1
         return grasp_dir_loop
     
-    # Module_P: how a module is participating in a loop
-    #   0: not in loop; 1: h-t in 360 loop or t-h in -360 loop; -1: otherwise
-    # Loop_P: whether a loop is counterclockwise or clockwise by the list order
-    #   0: to be decided; 1: 360 loop (counterclockwise); -1: -360 loop (clockwise)
-    # Grip_P: the arrangement of the three grippers in a w-grip
-    #   0: not in loop or is a v-grip
-    #   1: gripper_1 -> gripper_2 -> gripper_3 in counterclockwise direction
-    #   such that gamma_1 + gamma_2 + 180 ∈ [-115, 115] degrees
-    #   -1: # 1: gripper_1 -> gripper_2 -> gripper_3 in clockwise direction
-    #   such that gamma_1 + gamma_2 + 180 ∈ [245, 475] degrees
-    #   Reason: gamma_1 + 180 + gamma_2 + 180 + gamma_3 + 180 = 360 (cc) or 720 (c)
+    # Try to make the minimum cycle basis exactly face cycle basis
+    # Also try to put non-cyclic edges on the outer face of the embedding
     def get_polarities(self):
         module_polarities = [0] * self.m
         loop_polarities = [0] * self.c

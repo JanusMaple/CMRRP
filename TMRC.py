@@ -149,7 +149,7 @@ class TMRC:
         return G
 
     def get_mdl_cycles(self):
-        # Find smallest cycle basis for the graph G
+        # Find minimum cycle basis for the graph G
         spl_cycles = list(nx.simple_cycles(self.G))     # Parallel edges not considered
         rnd_idx = self.rng.permutation(len(spl_cycles))
         spl_cycles = [spl_cycles[i] for i in rnd_idx]   # Break ties for the sort after
