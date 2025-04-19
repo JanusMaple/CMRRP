@@ -1,6 +1,6 @@
 from TMRC import TMRC
 
-# Modular Robot Configuration with a Combinatorial Embedding
+# Embedded Modular Robot Configuration
 # The term "Polarity" is abused for representing:
 #   1. The order of the edges in a cycle list
 #   2. The rotation system of the grips
@@ -8,7 +8,7 @@ from TMRC import TMRC
 
 class EMRC(TMRC):
     """
-    The embedding of the configuration. 
+    Combinatorial Embedding of the Configuration on a Orientable 2D Surface.  
     
     Parameters
     ----------
@@ -145,13 +145,25 @@ class EMRC(TMRC):
 
         return module_polarities, loop_polarities, grip_polarities
     
-    # Return: [(gf, gt, gp, sp), ..., (gf, gt, gp, sp), gb, ..., gb] 
+    # Get the polarity vote of a w-grip if goes from m1 to m2
+    def get_polarity_vote(self, m1, grip, m2):
+        g1 = self.get_gripper(m1, grip)
+        g2 = self.get_gripper(m2, grip)
+        if g2 % 3 == (g1 + 1) % 3:
+            return -self.grip_polarities[grip]
+        else:
+            return self.grip_polarities[grip]
+    
+    # Return: [(gf, gt, gp, pp, pv), ..., (gf, gt, gp, pp, pv), gb, ..., gb]
     # gf: 2 * module + ht, the docking starts from this gripper
     # gt: 2 * module + ht, the docking goes to this gripper, which is be grasped by gf
     # gp: grip_path [grip, module, grip, ..., module, grip]
+    #   First loop is +1 polarity and secone is -1 polarity
     #   The starting grip is the only neighbor of the leaf node gf
     #   The end grip is non-leaf node gt or the only neighbor of the leaf node gt
-    # sp: suggested loop polarity (the probability for +1 polarity), sp ∈ (0, 1)
+    # pp: int; the path polarity, either -1 (clockwise) or +1 (conterclockwise)
+    # pv: (int, int), the path polarity and its vote counts
+    #   (-1 votes, +1 votes)
     # gb: 2 * module + ht, gripper to be broken
     def get_all_actions(self):
         actions = []
@@ -184,7 +196,7 @@ class EMRC(TMRC):
                     continue
                 gts.append(gv)
                 grip_ends.append(grip_end)
-           
+
             gps = [None] * len(gts)
             grip_path = [None] * (self.w + self.v)
             grip_visited = [False] * (self.w + self.v)
@@ -194,6 +206,10 @@ class EMRC(TMRC):
                 if not grip_needs_visiting[grip_end]:
                     grip_needs_visiting[grip_end] = True
                     num_gnv = num_gnv + 1
+            # front: an int list [grip, grip, ..., grip], the current front of grips
+            # paths_to_front: [paths_to_grip, ..., paths_to_grip]
+            # paths_to_grip: [path_to_grip] or [path_to_grip_-1, path_to_grip_+1]
+            # path_to_grip: ([*grip, module, ..., *grip], [-1 votes, +1 votes])
             def bfs_find_paths(front, paths_to_front):
                 num_gvd = 0             # Number of grippers that have been visited
                 while True:
@@ -209,19 +225,86 @@ class EMRC(TMRC):
                     # Update front and paths to all grips in front
                     new_front = []
                     new_paths_to_front = []
+                    grip_nf_idx = [-1] * (self.w + self.v)  # -1: Not in; >=0: The index
+                    len_nf = 0
                     for i in range(len(front)):
                         grip = front[i]
                         for mdl_grip in self.get_grip_neighbors_w_mdl(grip):
                             if not grip_visited[mdl_grip[1]]:
-                                new_front.append(mdl_grip[1])
-                                new_path = paths_to_front[i] + mdl_grip
-                                new_paths_to_front.append(new_path)
+                                if grip_nf_idx[mdl_grip[1]] < 0:
+                                    grip_nf_idx.append(mdl_grip[1])
+                                    new_front.append(mdl_grip[1])
+                                    new_paths_to_front.append([])
+                                    idx_nf = len_nf
+                                    grip_nf_idx[mdl_grip[1]] = len_nf
+                                    len_nf = len_nf + 1
+                                else:
+                                    idx_nf = grip_nf_idx[mdl_grip[1]]
+                                for path_to_grip in paths_to_front[i]:
+                                    path = path_to_grip[0]
+                                    votes = [path_to_grip[1][0], path_to_grip[1][1]]
+                                    len_path = len(path)
+                                    if self.is_grip_w[path[len_path - 1]]:
+                                        if len_path == 1:
+                                            m1 = gf // 2
+                                        else:
+                                            m1= path[len_path - 2]
+                                        grip = path[len_path - 1]
+                                        m2 = mdl_grip[0]
+                                        vote = self.get_polarity_vote(m1, grip, m2)
+                                        if vote == -1:
+                                            votes[0] = votes[0] + 1
+                                        else:
+                                            votes[1] = votes[1] + 1
+                                    new_path = (path + mdl_grip, votes)
+                                    if len(new_paths_to_front[idx_nf]) == 0:
+                                        new_paths_to_front[idx_nf].append(new_path)
+                                    elif len(new_paths_to_front[idx_nf]) == 1:
+                                        new_paths_to_front[idx_nf].append(new_path)
+                                        tendacy = new_paths_to_front[idx_nf][0][1][0] \
+                                                + new_paths_to_front[idx_nf][0][1][1]
+                                        new_tend = votes[0] + votes[1]
+                                        if new_tend < tendacy:
+                                            new_paths_to_front[idx_nf] = \
+                                                new_paths_to_front[idx_nf][::-1]
+                                    else:
+                                        tend_0 = new_paths_to_front[idx_nf][0][1][0] \
+                                                + new_paths_to_front[idx_nf][0][1][1]
+                                        tend_1 = new_paths_to_front[idx_nf][1][1][0] \
+                                                + new_paths_to_front[idx_nf][1][1][1]
+                                        new_tend = votes[0] + votes[1]
+                                        if new_tend < tend_0:
+                                            new_paths_to_front[idx_nf][0] = new_path
+                                        elif new_tend > tend_1:
+                                            new_paths_to_front[idx_nf][1] = new_path
                     front = new_front
                     paths_to_front = new_paths_to_front
-            if num_gnv > 0: bfs_find_paths([grip_start], [[grip_start]])
+            if num_gnv > 0: bfs_find_paths([grip_start], [[([grip_start], [0, 0])]])
             for i in range(len(gps)):
                 gps[i] = grip_path[grip_ends[i]]
-                actions.append((gf, gts[i], gps[i]))
+                gt = gts[i]
+                one_last_vote = False
+                if self.module2gripper[gt % 2][gt // 2] < 0:
+                    if self.is_grip_w[self.module2gripper[1 - gt % 2][gt // 2] // 3]:
+                        one_last_vote = True
+                for j in range(len(gps[i])):
+                    gp = gps[i][j][0]
+                    pv = gps[i][j][1]
+                    if one_last_vote:
+                        m1 = gp[-2]
+                        grip = gp[-1]
+                        m2 = gt // 2
+                        vote = self.get_polarity_vote(m1, grip, m2)
+                        if vote == -1:
+                            pv[0] = pv[0] + 1
+                        else:
+                            pv[1] = pv[1] + 1
+                    if len(gps[i]) == 1:
+                        actions.append((gf, gt, gp, -1, pv))
+                        actions.append((gf, gt, gp, +1, pv))
+                    else:
+                        pp = 2 * j - 1
+                        actions.append((gf, gt, gp, pp, pv))
 
         # DFS for finding directed bridges
         gripper_neighbors = [[]] * len(self.grippers)

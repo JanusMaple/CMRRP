@@ -4,10 +4,11 @@ import matplotlib.pyplot as plt
 
 # Topological Modular Robot Configuration
 class TMRC:
-    def __init__(self, w, v, n, m, 
-                 grippers, gripper2module, module2gripper, rng: np.random.Generator, 
-                 c = None, G = None, mdl_cycles = None, grip_cycles = None
-                 , real_cycles = None, is_grip_w = None):
+    grsp_identifier_2_id = [0, 2, 1]
+    def __init__(self, w, v, n, m,
+                grippers, gripper2module, module2gripper, rng: np.random.Generator, 
+                c = None, G = None, mdl_cycles = None, grip_cycles = None
+                , real_cycles = None, is_grip_w = None):
         """
         The topology of a configuration. Cycle basis will be found. 
 

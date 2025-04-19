@@ -12,7 +12,6 @@ from EMRC import EMRC
 class GMRC(EMRC):
     mdl_ang_cap = np.pi         # 180 degree, must be in (0, 180)
     grsp_ang_cap = 2            # 115 degree, must be in (0, 180)
-    grsp_identifier_2_id = [0, 2, 1]
 
     radius_ratio = 1 / 10       # The body radius ratio for a module
 
