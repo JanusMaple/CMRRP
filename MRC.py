@@ -267,8 +267,8 @@ class MRC:
             print("Grasping angles are ", end='')
             print(gmrc.grsp_angs)
             print("-----------------------------------------------------------------")
-            print("Available Actions are ", end='')
-            print(gmrc.actions)
+            print("Available Actions are ")
+            gmrc.print_actions()
             gmrc.show_geometry()
 
         return MRC(modules, gmrc)

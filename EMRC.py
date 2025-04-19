@@ -52,6 +52,8 @@ class EMRC(TMRC):
             self.loop_polarities = loop_polarities
             self.grip_polarities = grip_polarities
 
+        self.actions = self.get_all_actions()
+
     # [m0, m1, ..., mc], if mi > 0 than it is from head to tail; otherwise tail to head
     def get_module_loop(self, real_cycle):
         module_loop = [0] * (len(real_cycle) // 3)
@@ -189,7 +191,7 @@ class EMRC(TMRC):
             # It is possible for duplicate elements in grip_ends
             #   Case 1: A leaf node connected by a v-grip
             #   Case 2: Two leaf nodes sharing the same w-grip as the base
-            grip_ends = [self.module2gripper[gt % 2][gt // 2] // 3 for gt in gts]
+            grip_ends = [self.module2gripper[1 - gt % 2][gt // 2] // 3 for gt in gts]
             for gv in gvs:
                 grip_end = self.module2gripper[gv % 2][gv // 2] // 3
                 if grip_start == grip_end:
@@ -261,9 +263,9 @@ class EMRC(TMRC):
                                         new_paths_to_front[idx_nf].append(new_path)
                                     elif len(new_paths_to_front[idx_nf]) == 1:
                                         new_paths_to_front[idx_nf].append(new_path)
-                                        tendacy = new_paths_to_front[idx_nf][0][1][0] \
-                                                + new_paths_to_front[idx_nf][0][1][1]
-                                        new_tend = votes[0] + votes[1]
+                                        tendacy = new_paths_to_front[idx_nf][0][1][1] \
+                                                - new_paths_to_front[idx_nf][0][1][0]
+                                        new_tend = votes[1] - votes[0]
                                         if new_tend < tendacy:
                                             new_paths_to_front[idx_nf] = \
                                                 new_paths_to_front[idx_nf][::-1]
@@ -289,16 +291,21 @@ class EMRC(TMRC):
                         one_last_vote = True
                 for j in range(len(gps[i])):
                     gp = gps[i][j][0]
-                    pv = gps[i][j][1]
+                    vnp = gps[i][j][1][0]   # Number of votes for negative polarity
+                    vpp = gps[i][j][1][1]   # Number of votes for positive polarity
                     if one_last_vote:
-                        m1 = gp[-2]
+                        if len(gp) <= 1:
+                            m1 = gf // 2
+                        else:
+                            m1 = gp[-2]
                         grip = gp[-1]
                         m2 = gt // 2
                         vote = self.get_polarity_vote(m1, grip, m2)
                         if vote == -1:
-                            pv[0] = pv[0] + 1
+                            vnp = vnp + 1
                         else:
-                            pv[1] = pv[1] + 1
+                            vpp = vpp + 1
+                    pv = (vnp, vpp)
                     if len(gps[i]) == 1:
                         actions.append((gf, gt, gp, -1, pv))
                         actions.append((gf, gt, gp, +1, pv))
@@ -339,5 +346,17 @@ class EMRC(TMRC):
             else:
                 gripper = 3 * grip + 1
             if gcr[gripper]:
-                actions.append(gripper)
+                actions.append(self.gripper2module[gripper])
         return actions
+    
+    # Print Feasible Actions (Mainly for Testing and Debugging)
+    def print_actions(self):
+        ht_str = ["Head", "Tail"]
+        for action in self.actions:
+            if isinstance(action, tuple):
+                gf, gt, gp, pp, pv = action
+                print(f"Module {gf // 2} {ht_str[gf % 2]} Grasps ", end = "")
+                print(f"Module {gt // 2} {ht_str[gt % 2]} with: ")
+                print(f"    path {gp}; polarity {pp} and votes {pv}")
+            else:
+                print(f"{ht_str[action % 2]} of Module {action // 2} Releases")

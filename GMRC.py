@@ -93,8 +93,6 @@ class GMRC(EMRC):
             # Format: [(Bounding Box, Body Polygon), ...]
             self.module_colliders = []          # The bounding box and body polygon
             self.update_all_module_geometry()   # Update module_geometries
-        
-        self.actions = self.get_all_actions()
 
     # Generate random angles under dock-angle constraint
     def get_random_angles_da(self):
