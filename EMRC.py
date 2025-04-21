@@ -374,8 +374,20 @@ class EMRC(TMRC):
     def _execute_releasing(self, gb):
         pass
     
+    def print_all_directions(self):
+        print(f"Module Loops are: {self.module_loops}")
+        print(f"Module Directions are: {self.module_ht_loops}")
+        print(f"Grasp Loops are: {self.grasp_loops}")
+        print(f"Grasp Directions are: {self.grasp_dir_loops}")
+
+    def print_all_polarities(self):
+        print(f"Module Polarities are: {self.module_polarities}")
+        print(f"Loop Polarities are: {self.loop_polarities}")
+        print(f"Grip Polarities are: {self.grip_polarities}")
+
     # Print Feasible Actions (Mainly for Testing and Debugging)
     def print_actions(self):
+        print("Available Actions are: ")
         ht_str = ["Head", "Tail"]
         for action in self.actions:
             if isinstance(action, tuple):

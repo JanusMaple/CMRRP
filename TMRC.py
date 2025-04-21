@@ -383,12 +383,43 @@ class TMRC:
         else:
             pass
     
+    # Print w-grip modules
+    def print_w_grip_modules(self):
+        grip2modules = dict()
+        for grip in range(self.w + self.v):
+            if self.is_grip_w[grip]:
+                grip2modules[grip] = [
+                    int(self.gripper2module[3 * grip] // 2), 
+                    int(self.gripper2module[3 * grip + 1] // 2), 
+                    int(self.gripper2module[3 * grip + 2] // 2)
+                ]
+        print(f"Modules for w-grips are: {grip2modules}")
+
+    def print_configuration_data(self):
+        print("Module Robot Configuration Basic Data: ")
+        print(f"w: {self.w}", end = '; ', flush=True)
+        print(f"v: {self.v}", end = '; ', flush=True)
+        print(f"n: {self.n}")
+        print(f"Gripper state: {self.grippers}")
+
+    def print_mdl_gpr_mapping(self):
+        print(f"Module to grippers are: {self.module2gripper}")
+        print("Grippers belong to module: ", end='')
+        print([int(i // 2) for i in self.gripper2module])
+        print("Grippers' head-tail conditions are: ", end='')
+        print([int(i % 2) for i in self.gripper2module])
+
+    def print_all_cycles(self):
+        print(f"Module Cycles are: {self.mdl_cycles}")
+        print(f"Grip Cycles are: {self.grip_cycles}")
+        print(f"Real Cycles are: {self.real_cycles}")
+
+    def show_topology(self):
+        TMRC.draw_grip_graph(self.G)
+
     @staticmethod
-    def show_topology(G):                   # Draw the topology graph of an MRC
+    def draw_grip_graph(G):                     # Draw the topology graph of an MRC
         assert isinstance(G, nx.MultiGraph)
-        
-        print("Edges in the graph: ", end='')
-        print(G.edges)
 
         pos = nx.spring_layout(G)
         fig, ax = plt.subplots()

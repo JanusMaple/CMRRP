@@ -438,18 +438,28 @@ class GMRC(EMRC):
                     return True
         return False
 
-    # Show w-grip modules
-    def show_w_grip_modules(self):
-        grip2modules = dict()
-        for grip in range(self.w + self.v):
-            if self.is_grip_w[grip]:
-                grip2modules[grip] = [
-                    int(self.gripper2module[3 * grip] // 2), 
-                    int(self.gripper2module[3 * grip + 1] // 2), 
-                    int(self.gripper2module[3 * grip + 2] // 2)
-                ]
-        print("Modules for w-grips are: ", end='')
-        print(grip2modules)
+    def execute_action(self, action):
+        super().execute_action(action)
+        if isinstance(action, tuple):
+            self._execute_grasping(action[0], action[1], action[2], action[3], action[4])
+        else:
+            self._execute_releasing(action)
+
+    def _execute_grasping(self, gf, gt, gp, pp, pv):
+        pass
+
+    def _execute_releasing(self, gb):
+        pass
+
+    def print_all_angs(self):
+        np.set_printoptions(precision=2, suppress=True, linewidth=1024)
+        print(f"Bending angles are {self.bend_angs}")
+        print(f"Grasping angles are {self.grsp_angs}")
+
+    def show_all(self):
+        self.print_all()
+        self.show_topology()
+        self.show_geometry()
 
     def show_geometry(self):
         
@@ -476,18 +486,22 @@ class GMRC(EMRC):
             ax.plot(*self.module_colliders[i][1].exterior.xy, 
                     color = 'b')
 
-    def execute_action(self, action):
-        super().execute_action(action)
-        if isinstance(action, tuple):
-            self._execute_grasping(action[0], action[1], action[2], action[3], action[4])
-        else:
-            self._execute_releasing(action)
-
-    def _execute_grasping(self, gf, gt, gp, pp, pv):
-        pass
-
-    def _execute_releasing(self, gb):
-        pass
+    def print_all(self):
+        print("-----------------------------------------------------------------")
+        self.print_configuration_data()
+        print("-----------------------------------------------------------------")
+        self.print_mdl_gpr_mapping()
+        print("-----------------------------------------------------------------")
+        self.print_all_cycles()
+        print("-----------------------------------------------------------------")
+        self.print_all_directions()
+        print("-----------------------------------------------------------------")
+        self.print_all_polarities()
+        print("-----------------------------------------------------------------")
+        self.print_all_angs()
+        print("-----------------------------------------------------------------")
+        self.print_actions()
+        print("-----------------------------------------------------------------")
 
     # Get all module segment end points and module segment starting angles
     @staticmethod
