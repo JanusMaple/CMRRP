@@ -99,24 +99,28 @@ class EMRC(TMRC):
     # Also try to put non-cyclic edges on the outer face of the embedding
     def get_polarities(self):
         module_polarities = [0] * self.m
+        mdl_plr_weights = [0] * self.m
         loop_polarities = [0] * self.c
         grip_polarities = [0] * (self.w + self.v)
         # Large cycles first
         for i in reversed(range(len(self.module_loops))):
             # Decide Loop Polarity
             module_loop = self.module_loops[i]
+            vote = 0
             for j in range(len(module_loop)):
                 module = module_loop[j]
                 # If the module already h-t in 360 or t-h in -360
                 if module_polarities[module] == 1:
                     # Loop should be 360 for t-h or -360 for h-t
-                    loop_polarities[i] = -self.module_ht_loops[i][j]
-                    break
+                    vote = vote - self.module_ht_loops[i][j]
                 elif module_polarities[module] == -1:
-                    loop_polarities[i] = self.module_ht_loops[i][j]
-                    break
+                    vote = vote + self.module_ht_loops[i][j]
+            if vote == 0:
+                loop_polarities[i] = int(self.rng.choice([-1, 1], 1)[0])    # Random
+            elif vote < 0:
+                loop_polarities[i] = -1
             else:
-                loop_polarities[i] = 1          # Default loop polarity is 360
+                loop_polarities[i] = 1
             
             # Decide Module Polarity
             for j in range(len(module_loop)):   # Update module polarities
@@ -124,8 +128,16 @@ class EMRC(TMRC):
                 new_module_polarity = loop_polarities[i] * self.module_ht_loops[i][j]
                 if module_polarities[module] == 0:
                     module_polarities[module] = new_module_polarity
+                    mdl_plr_weights[module] = len(module_loop)
                 elif not module_polarities[module] == new_module_polarity:
-                    module_polarities[module] = int(self.rng.choice([-1, 1], 1)[0])
+                    w_old = mdl_plr_weights[module]
+                    w_new = len(module_loop)
+                    # Smaller Loop has Larger Chance to Dominate the Fate of a Module
+                    if self.rng.random() > w_new / (w_old + w_new):
+                        module_polarities[module] = new_module_polarity
+                        mdl_plr_weights[module] = w_new
+                else:
+                    mdl_plr_weights[module] = len(module_loop)      # Enhance this Fate
 
             # Decide Grip Polarity
             for j in range(len(module_loop)):
@@ -348,6 +360,19 @@ class EMRC(TMRC):
             if gcr[gripper]:
                 actions.append(self.gripper2module[gripper])
         return actions
+    
+    def execute_action(self, action):
+        super().execute_action(action)
+        if isinstance(action, tuple):
+            self._execute_grasping(action[0], action[1], action[2], action[3], action[4])
+        else:
+            self._execute_releasing(action)
+
+    def _execute_grasping(self, gf, gt, gp, pp, pv):
+        pass
+
+    def _execute_releasing(self, gb):
+        pass
     
     # Print Feasible Actions (Mainly for Testing and Debugging)
     def print_actions(self):

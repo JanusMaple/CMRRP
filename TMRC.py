@@ -294,6 +294,95 @@ class TMRC:
             gns.append(int(self.grippers[g]))
         return gns
     
+    # Execute an action on topological level
+    def execute_action(self, action):
+        if isinstance(action, tuple):
+            self._execute_grasping(action[0], action[1], action[2])
+        else:
+            self._execute_releasing(action)
+
+    # gf (2 * mdl + ht) grasps gt (2 * mdl + ht)
+    def _execute_grasping(self, gf, gt, gp):
+        if self.module2gripper[gt % 2][gt // 2] >= 0:               # Grasp a v-grip
+            self.w = self.w + 1
+            self.v = self.v - 1
+            self.n = self.n + 1
+            emt_gripper = self.module2gripper[1 - gf % 2][gf // 2]  # Extrimity gripper
+            tar_gripper = self.module2gripper[gt % 2][gt // 2] + 1  # Target gripper
+            self.grippers[emt_gripper] = tar_gripper
+            self.grippers[tar_gripper] = emt_gripper
+            self.gripper2module[tar_gripper] = gf
+            self.module2gripper[gf % 2][gf // 2] = tar_gripper
+
+            self.c = self.c + 1
+            self.G.remove_node(-emt_gripper - 1)
+            key = self.G.number_of_edges(emt_gripper // 3, tar_gripper // 3)
+            self.G.add_edge(emt_gripper // 3, tar_gripper // 3, key=key, module=gf // 2)
+            mdl_cycle = gp + [gf // 2, gp[0]]
+            real_cycle = self.get_real_cycle(mdl_cycle)
+            grip_cycle = self.get_grip_cycle(mdl_cycle)
+            self.mdl_cycles.append(mdl_cycle)
+            self.real_cycles.append(real_cycle)
+            self.grip_cycles.append(grip_cycle)
+            self.is_grip_w[tar_gripper // 3] = True
+        else:                                                       # Grasp a leaf node
+            self.v = self.v + 1
+            self.n = self.n + 2
+            emt_gpr_1 = self.module2gripper[1 - gf % 2][gf // 2]
+            gsp_gpr_1 = 3 * (self.w + self.v - 1) + 1               # 1 Holds 2
+            emt_gpr_2 = self.module2gripper[1 - gt % 2][gt // 2]
+            gsp_gpr_2 = 3 * (self.w + self.v - 1)
+            self.grippers.extend([-2, -2, -2])
+            self.grippers[emt_gpr_1] = gsp_gpr_1
+            self.grippers[gsp_gpr_1] = emt_gpr_1
+            self.grippers[emt_gpr_2] = gsp_gpr_2
+            self.grippers[gsp_gpr_2] = emt_gpr_2
+            self.gripper2module[gsp_gpr_1] = gf
+            self.gripper2module[gsp_gpr_2] = gt
+            self.module2gripper[gf % 2][gf // 2] = gsp_gpr_1
+            self.module2gripper[gt % 2][gt // 2] = gsp_gpr_2
+
+            self.c = self.c + 1
+            self.G.remove_node(-emt_gpr_1 - 1)
+            self.G.remove_node(-emt_gpr_2 - 1)
+            grip_1 = emt_gpr_1 // 3
+            grip_2 = emt_gpr_2 // 3
+            new_grip = self.w + self.v - 1
+            self.G.add_edge(grip_1, new_grip, key=0, module=gf // 2)
+            self.G.add_edge(grip_2, new_grip, key=0, module=gt // 2)
+            mdl_cycle = gp + [gt // 2, new_grip, gf // 2, gp[0]]
+            real_cycle = self.get_real_cycle(mdl_cycle)
+            grip_cycle = self.get_grip_cycle(mdl_cycle)
+            self.mdl_cycles.append(mdl_cycle)
+            self.real_cycles.append(real_cycle)
+            self.grip_cycles.append(grip_cycle)
+            self.is_grip_w.append(False)
+
+    # Release the grasp of gb (2 * mdl + ht)
+    def _execute_releasing(self, gb):
+        if self.is_grip_w[self.module2gripper[gb % 2][gb // 2] // 3]:
+            self.w = self.w - 1
+            self.v = self.v + 1
+            self.n = self.n - 1
+            rls_gripper = self.module2gripper[gb % 2][gb // 2]
+            emt_gripper = self.module2gripper[1 - gb % 2][gb // 2]
+            self.grippers[rls_gripper] = -2
+            self.grippers[emt_gripper] = -1
+            self.gripper2module[rls_gripper] = -1
+            self.module2gripper[gb % 2][gb // 2] = -1
+
+            self.c = self.c - 1
+            grip_1 = rls_gripper // 3                               # 1 Holds Somthing
+            grip_2 = emt_gripper // 3
+            new_grip = -emt_gripper - 1
+            key = self.G.number_of_edges(grip_1, grip_2) - 1
+            self.G.remove_edge(grip_1, grip_2, key=key)
+            self.G.add_edge(grip_2, new_grip, key=0, module=gb // 2)
+            # TODO: Update all cycles
+            self.is_grip_w[rls_gripper // 3] = False
+        else:
+            pass
+    
     @staticmethod
     def show_topology(G):                   # Draw the topology graph of an MRC
         assert isinstance(G, nx.MultiGraph)

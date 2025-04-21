@@ -59,7 +59,7 @@ class GMRC(EMRC):
                     break
                 if len(self.module_loops) > 0:      # If the graph is not acyclic
                     error = 1
-                    for try_docking_loops in range(10):
+                    for try_docking_loops in range(3):
                         x0 = self.initialize_x()    # Initialize all variables
                         x0 = self.optim_angles_la(x0)
                         x = self.optim_angles_ld(x0)
@@ -453,6 +453,9 @@ class GMRC(EMRC):
 
     def show_geometry(self):
         
+        if self.module_geometries == {}:
+            return
+
         fig, ax = plt.subplots(figsize=(10, 10))
         ax.set_aspect('equal')
         ax.axis('off')
@@ -473,8 +476,17 @@ class GMRC(EMRC):
             ax.plot(*self.module_colliders[i][1].exterior.xy, 
                     color = 'b')
 
-    # TODO: Also update actions here
-    def excecute_action(self, action):
+    def execute_action(self, action):
+        super().execute_action(action)
+        if isinstance(action, tuple):
+            self._execute_grasping(action[0], action[1], action[2], action[3], action[4])
+        else:
+            self._execute_releasing(action)
+
+    def _execute_grasping(self, gf, gt, gp, pp, pv):
+        pass
+
+    def _execute_releasing(self, gb):
         pass
 
     # Get all module segment end points and module segment starting angles
