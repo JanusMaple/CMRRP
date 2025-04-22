@@ -378,9 +378,49 @@ class TMRC:
             key = self.G.number_of_edges(grip_1, grip_2) - 1
             self.G.remove_edge(grip_1, grip_2, key=key)
             self.G.add_edge(grip_2, new_grip, key=0, module=gb // 2)
-            # TODO: Update all cycles
+            self._update_cycles_wo(gb // 2)
             self.is_grip_w[rls_gripper // 3] = False
         else:
+            pass
+
+    def _update_cycles_wo(self, module, grip = None):
+        if grip is None:                                            # Release w-grip
+            cyc_idxes = []                                          # Deleted cycles
+            mdl_idxes = []                                          # Index of the mdl
+            min_cyc_idx = -1                                        # Minimum del cycle
+            min_mdl_idx = -1
+            len_min = self.m + 1
+            for i in range(len(self.mdl_cycles)):
+                mdl_cycle  = self.mdl_cycles[i]
+                len_mdl = len(mdl_cycle) // 2                       # Number of Modules
+                for j in range(len_mdl):
+                    if module == mdl_cycle[2 * j + 1]:
+                        cyc_idxes.append(i)
+                        mdl_idxes.append(j)
+                        if len_mdl < len_min:
+                            min_cyc_idx = i
+                            min_mdl_idx = j
+                            len_min = len_mdl
+                        break
+            if len(cyc_idxes) > 1:
+                min_cycle = self.mdl_cycles[min_cyc_idx]
+                path_1 = min_cycle[min_mdl_idx + 1:-1] + min_cycle[:min_mdl_idx]
+                path_2 = min_cycle[min_mdl_idx - 1::-1] + min_cycle[-2:min_mdl_idx:-1]
+                for i in range(len(cyc_idxes)):
+                    cyc_idx = cyc_idxes[i]
+                    mdl_idx = mdl_idxes[i]
+                    if cyc_idx != min_cyc_idx:
+                        mdl_cycle = self.mdl_cycles[cyc_idx]
+                        if mdl_cycle[mdl_idx - 1] == path_1[0]:
+                            mdl_cycle[mdl_idx - 1 : mdl_idx + 2] = path_1
+                        else:
+                            mdl_cycle[mdl_idx - 1 : mdl_idx + 2] = path_2
+                        self.real_cycles[cyc_idx] = self.get_real_cycle(mdl_cycle)
+                        self.grip_cycles[cyc_idx] = self.get_grip_cycle(mdl_cycle)
+            self.mdl_cycles.remove(min_cyc_idx)
+            self.real_cycles.remove(min_cyc_idx)
+            self.grip_cycles.remove(min_cyc_idx)
+        else:                                                       # Release v-grip
             pass
     
     # Print w-grip modules
