@@ -536,3 +536,8 @@ class GMRC(EMRC):
                     bbox=dict(boxstyle="round,pad=0.5", 
                               facecolor=colors[i], 
                               alpha=0.5))
+            
+    @staticmethod
+    def get_random_configuration(seed, m, w = None, v = None):
+        params = GMRC.get_random_configuration_model(seed, m, w, v)
+        return GMRC(*params)
