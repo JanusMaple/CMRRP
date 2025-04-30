@@ -55,7 +55,7 @@ class MRC:
         for i in range(m):
             modules.append(Module())
 
-        gmrc = GMRC.get_random_configuration(seed, m, w, v)
+        gmrc = GMRC.get_random_configuration(m, seed, w, v)
         
         # Grasp process to form an MRC
         Module.start_hacking()

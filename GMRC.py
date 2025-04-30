@@ -538,6 +538,6 @@ class GMRC(EMRC):
                               alpha=0.5))
             
     @staticmethod
-    def get_random_configuration(seed, m, w = None, v = None):
-        params = GMRC.get_random_configuration_model(seed, m, w, v)
+    def get_random_configuration(m, seed = None, w = None, v = None):
+        params = GMRC.get_random_configuration_model(m ,seed, w, v)
         return GMRC(*params)

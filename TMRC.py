@@ -576,7 +576,7 @@ class TMRC:
             G, pos, edge_labels=edge_labels, label_pos=0.5, font_size=8)
         
     @staticmethod
-    def get_random_configuration_model(seed, m, w = None, v = None):
+    def get_random_configuration_model(m, seed = None, w = None, v = None):
         rng = np.random.default_rng(seed)
 
         # Get the number of III-grips
@@ -708,6 +708,6 @@ class TMRC:
         return (w, v, n, m, grippers, gripper2module, module2gripper, rng)
     
     @staticmethod
-    def get_random_configuration(seed, m, w = None, v = None):
-        params = TMRC.get_random_configuration_model(seed, m, w, v)
+    def get_random_configuration(m, seed = None, w = None, v = None):
+        params = TMRC.get_random_configuration_model(m ,seed, w, v)
         return TMRC(*params)

@@ -399,6 +399,6 @@ class EMRC(TMRC):
                 print(f"{ht_str[action % 2]} of Module {action // 2} Releases")
 
     @staticmethod
-    def get_random_configuration(seed, m, w = None, v = None):
-        params = EMRC.get_random_configuration_model(seed, m, w, v)
+    def get_random_configuration(m, seed = None, w = None, v = None):
+        params = EMRC.get_random_configuration_model(m ,seed, w, v)
         return EMRC(*params)
