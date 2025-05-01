@@ -441,9 +441,10 @@ class GMRC(EMRC):
     def execute_action(self, action):
         super().execute_action(action)
         if isinstance(action, tuple):
-            self._execute_grasping(action[0], action[1], action[2], action[3], action[4])
+            GMRC._execute_grasping(self, 
+                                   action[0], action[1], action[2], action[3], action[4])
         else:
-            self._execute_releasing(action)
+            GMRC._execute_releasing(self, action)
 
     def _execute_grasping(self, gf, gt, gp, pp, pv):
         pass

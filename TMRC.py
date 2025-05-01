@@ -304,9 +304,9 @@ class TMRC:
     # Execute an action on topological level
     def execute_action(self, action):
         if isinstance(action, tuple):
-            self._execute_grasping(action[0], action[1], action[2])
+            TMRC._execute_grasping(self, action[0], action[1], action[2])
         else:
-            self._execute_releasing(action)
+            TMRC._execute_releasing(self, action)
 
     # gf (2 * mdl + ht) grasps gt (2 * mdl + ht)
     def _execute_grasping(self, gf, gt, gp):
@@ -344,6 +344,7 @@ class TMRC:
             self.grippers[gsp_gpr_1] = emt_gpr_1
             self.grippers[emt_gpr_2] = gsp_gpr_2
             self.grippers[gsp_gpr_2] = emt_gpr_2
+            self.gripper2module.extend([-1, -1, -1])
             self.gripper2module[gsp_gpr_1] = gf
             self.gripper2module[gsp_gpr_2] = gt
             self.module2gripper[gf % 2][gf // 2] = gsp_gpr_1
@@ -356,7 +357,8 @@ class TMRC:
             grip_2 = emt_gpr_2 // 3
             new_grip = self.w + self.v - 1
             self.G.add_edge(grip_1, new_grip, key=0, module=gf // 2)
-            self.G.add_edge(grip_2, new_grip, key=0, module=gt // 2)
+            key = self.G.number_of_edges(grip_2, new_grip)
+            self.G.add_edge(grip_2, new_grip, key=key, module=gt // 2)
             mdl_cycle = gp + [gt // 2, new_grip, gf // 2, gp[0]]
             real_cycle = self.get_real_cycle(mdl_cycle)
             grip_cycle = self.get_grip_cycle(mdl_cycle)
@@ -382,7 +384,10 @@ class TMRC:
             grip_1 = rls_gripper // 3                               # 1 Holds Something
             grip_2 = emt_gripper // 3
             new_grip = -emt_gripper - 1
-            key = self.G.number_of_edges(grip_1, grip_2) - 1
+            edges = self.G.get_edge_data(grip_1, grip_2)
+            for key, data in edges.items():
+                if data.get('module') == gb // 2:
+                    break
             self.G.remove_edge(grip_1, grip_2, key=key)
             self.G.add_edge(grip_2, new_grip, key=0, module=gb // 2)
             self._update_cycles_wo(gb // 2)
@@ -399,13 +404,13 @@ class TMRC:
             self.grippers[emt_gpr_1] = -1
             self.grippers[emt_gpr_2] = -1
             del_grip = rls_gpr_1 // 3
-            self.grippers[3 * del_grip, 3 * del_grip + 3] = []
+            self.grippers[3 * del_grip : 3 * del_grip + 3] = []
             for i in range(3 * (self.w + self.v)):
                 if self.grippers[i] >= 3 * del_grip + 3:
                     self.grippers[i] = self.grippers[i] - 3
-            self.gripper2module[3 * del_grip, 3 * del_grip + 3] = []
+            self.gripper2module[3 * del_grip : 3 * del_grip + 3] = []
             for ht in range(2):
-                for mdl in self.m:
+                for mdl in range(self.m):
                     if self.module2gripper[ht][mdl] == rls_gpr_1:
                         self.module2gripper[ht][mdl] = -1
                     elif self.module2gripper[ht][mdl] == rls_gpr_2:
@@ -422,11 +427,11 @@ class TMRC:
             self.G.add_edge(grip_1, new_leaf_1, key=0, module=module_1)
             self.G.add_edge(grip_2, new_leaf_2, key=0, module=module_2)
             relabel_mapping = {}
-            for i in range(del_grip + 1, 3 * (self.w + self.v + 1)):
-                relabel_mapping[3 * i] = 3 * i - 3
+            for i in range(del_grip + 1, self.w + self.v + 1):
+                relabel_mapping[i] = i - 1
             nx.relabel_nodes(self.G, relabel_mapping, copy=False)
             self._update_cycles_wo(None, del_grip)
-            self.is_grip_w[del_grip] = []
+            self.is_grip_w[del_grip : del_grip + 1] = []
 
     def _update_cycles_wo(self, module, grip = None):
         if grip is None:                                            # Release w-grip
@@ -441,10 +446,10 @@ class TMRC:
                 for j in range(len_cyc):
                     if module == mdl_cycle[2 * j + 1]:
                         cyc_idxes.append(i)
-                        mdl_idxes.append(j)
+                        mdl_idxes.append(2 * j + 1)
                         if len_cyc < min_len_cyc:
                             min_cyc_idx = i
-                            min_mdl_idx = j
+                            min_mdl_idx = 2 * j + 1
                             min_len_cyc = len_cyc
                         break
             if len(cyc_idxes) > 1:
@@ -462,9 +467,9 @@ class TMRC:
                             mdl_cycle[mdl_idx - 1 : mdl_idx + 2] = path_2
                         self.real_cycles[cyc_idx] = self.get_real_cycle(mdl_cycle)
                         self.grip_cycles[cyc_idx] = self.get_grip_cycle(mdl_cycle)
-            self.mdl_cycles[min_cyc_idx] = []
-            self.real_cycles[min_cyc_idx] = []
-            self.grip_cycles[min_cyc_idx] = []
+            self.mdl_cycles[min_cyc_idx : min_cyc_idx + 1] = []
+            self.real_cycles[min_cyc_idx : min_cyc_idx + 1] = []
+            self.grip_cycles[min_cyc_idx : min_cyc_idx + 1] = []
         else:                                                       # Release v-grip
             # NOTE: Naturally, all grips after will be shifted forward by 1 step
             cyc_idxes = []
@@ -478,10 +483,10 @@ class TMRC:
                 for j in range(len_cyc):
                     if grip == grip_cycle[2 * j + 1]:
                         cyc_idxes.append(i)
-                        grip_idxes.append(j)
+                        grip_idxes.append(2 * j + 1)
                         if len_cyc < min_len_cyc:
                             min_cyc_idx = i
-                            min_grip_idx = j
+                            min_grip_idx = 2 * j + 1
                             min_len_cyc = len_cyc
                         break
             if len(cyc_idxes) > 1:
@@ -503,10 +508,10 @@ class TMRC:
                         elif grip_idx == ori_len - 2:
                             grip_cycle[0] = grip_cycle[-1]
                         self.mdl_cycles[cyc_idx] = self.grip_cyc_to_mdl_cyc(grip_cycle)
-            self.mdl_cycles[min_cyc_idx] = []
+            self.mdl_cycles[min_cyc_idx : min_cyc_idx + 1] = []
             for i in range(len(self.mdl_cycles)):
                 mdl_cycle = self.mdl_cycles[i]
-                num_grips = len(mdl_cycle) // 2 + 1
+                num_grips = len(mdl_cycle) // 2
                 for j in range(num_grips):
                     if mdl_cycle[2 * j] >= grip:
                         mdl_cycle[2 * j] = mdl_cycle[2 * j] - 3
@@ -704,6 +709,8 @@ class TMRC:
                 gripper_available[grippers[idx_g]] = False
                 idx_m = idx_m + 1
             if idx_m >= m: break
+
+        grippers = [int(grip) for grip in grippers]
 
         return (w, v, n, m, grippers, gripper2module, module2gripper, rng)
     

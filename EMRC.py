@@ -364,9 +364,9 @@ class EMRC(TMRC):
     def execute_action(self, action):
         super().execute_action(action)
         if isinstance(action, tuple):
-            self._execute_grasping(action[0], action[1], action[2], action[3], action[4])
+            EMRC._execute_grasping(self, action[0], action[1], action[2], action[3], action[4])
         else:
-            self._execute_releasing(action)
+            EMRC._execute_releasing(self, action)
 
     def _execute_grasping(self, gf, gt, gp, pp, pv):
         pass
@@ -400,5 +400,5 @@ class EMRC(TMRC):
 
     @staticmethod
     def get_random_configuration(m, seed = None, w = None, v = None):
-        params = EMRC.get_random_configuration_model(m ,seed, w, v)
+        params = EMRC.get_random_configuration_model(m, seed, w, v)
         return EMRC(*params)
