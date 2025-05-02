@@ -384,7 +384,8 @@ class TMRC:
             self.c = self.c - 1
             grip_1 = rls_gripper // 3                               # 1 Holds Something
             grip_2 = emt_gripper // 3
-            new_grip = -emt_gripper - 1
+            ge = self.gripper2module[emt_gripper]
+            new_grip = -(2 * (ge // 2) + 1 - ge % 2) - 1
             edges = self.G.get_edge_data(grip_1, grip_2)
             for key, data in edges.items():
                 if data.get('module') == gb // 2:
@@ -402,18 +403,25 @@ class TMRC:
             rls_gpr_2 = 1 - rls_gpr_1 % 3 + 3 * (rls_gpr_1 // 3)
             emt_gpr_2 = self.grippers[rls_gpr_2]
             module_2 = self.gripper2module[rls_gpr_2] // 2
+            # Grip to delete
+            del_grip = rls_gpr_1 // 3
+            # Leaf node to add
+            grip_1 = emt_gpr_1 // 3
+            ge = self.gripper2module[emt_gpr_1]
+            new_leaf_1 = -(2 * (ge // 2) + 1 - ge % 2) - 1
+            grip_2 = emt_gpr_2 // 3
+            ge = self.gripper2module[emt_gpr_2]
+            new_leaf_2 = -(2 * (ge // 2) + 1 - ge % 2) - 1
+            # Update grippers
             self.grippers[emt_gpr_1] = -1
             self.grippers[emt_gpr_2] = -1
-            del_grip = rls_gpr_1 // 3
-            if emt_gpr_1 // 3 >= del_grip + 1:  # Update index of emt_gpr after deletion
-                emt_gpr_1 = emt_gpr_1 - 3
-            if emt_gpr_2 // 3 >= del_grip + 1:
-                emt_gpr_2 = emt_gpr_2 - 3
             self.grippers[3 * del_grip : 3 * del_grip + 3] = []
             for i in range(3 * (self.w + self.v)):
                 if self.grippers[i] >= 3 * del_grip + 3:
                     self.grippers[i] = self.grippers[i] - 3
+            # Update gripper2module
             self.gripper2module[3 * del_grip : 3 * del_grip + 3] = []
+            # Update module2gripper
             for ht in range(2):
                 for mdl in range(self.m):
                     if self.module2gripper[ht][mdl] == rls_gpr_1:
@@ -422,14 +430,9 @@ class TMRC:
                         self.module2gripper[ht][mdl] = -1
                     elif self.module2gripper[ht][mdl] >= 3 * del_grip + 3:
                         self.module2gripper[ht][mdl] = self.module2gripper[ht][mdl] - 3
-            
+            # Update c
             self.c = self.c - 1
-            grip_1 = emt_gpr_1 // 3
-            ge = self.gripper2module[emt_gpr_1]
-            new_leaf_1 = -(2 * (ge // 2) + 1 - ge % 2) - 1
-            grip_2 = emt_gpr_2 // 3
-            ge = self.gripper2module[emt_gpr_2]
-            new_leaf_2 = -(2 * (ge // 2) + 1 - ge % 2) - 1
+            # Update G
             self.G.remove_node(del_grip)
             self.G.add_edge(grip_1, new_leaf_1, key=0, module=module_1)
             self.G.add_edge(grip_2, new_leaf_2, key=0, module=module_2)
@@ -437,7 +440,9 @@ class TMRC:
             for i in range(del_grip + 1, self.w + self.v + 1):
                 relabel_mapping[i] = i - 1
             nx.relabel_nodes(self.G, relabel_mapping, copy=False)
+            # Update Cycles
             self._update_cycles_wo(None, del_grip)
+            # Update is_grip_w
             self.is_grip_w[del_grip : del_grip + 1] = []
 
     def _update_cycles_wo(self, module, grip = None):
