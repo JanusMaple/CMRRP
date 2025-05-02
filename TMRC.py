@@ -130,7 +130,8 @@ class TMRC:
                     continue
 
                 grip_1 = idx_g // 3
-                grip_2 = -idx_g - 1
+                grip_2 = -(2 * (self.gripper2module[idx_g] // 2) 
+                           + 1 - self.gripper2module[idx_g] % 2) - 1
                 
                 G.add_edge(grip_1, grip_2, key=0, module=int(module))
 
@@ -322,7 +323,7 @@ class TMRC:
             self.module2gripper[gf % 2][gf // 2] = tar_gripper
 
             self.c = self.c + 1
-            self.G.remove_node(-emt_gripper - 1)
+            self.G.remove_node(-gf - 1)
             key = self.G.number_of_edges(emt_gripper // 3, tar_gripper // 3)
             self.G.add_edge(emt_gripper // 3, tar_gripper // 3, key=key, module=gf // 2)
             mdl_cycle = gp + [gf // 2, gp[0]]
@@ -351,8 +352,8 @@ class TMRC:
             self.module2gripper[gt % 2][gt // 2] = gsp_gpr_2
 
             self.c = self.c + 1
-            self.G.remove_node(-emt_gpr_1 - 1)
-            self.G.remove_node(-emt_gpr_2 - 1)
+            self.G.remove_node(-gf - 1)
+            self.G.remove_node(-gt - 1)
             grip_1 = emt_gpr_1 // 3
             grip_2 = emt_gpr_2 // 3
             new_grip = self.w + self.v - 1
@@ -404,6 +405,10 @@ class TMRC:
             self.grippers[emt_gpr_1] = -1
             self.grippers[emt_gpr_2] = -1
             del_grip = rls_gpr_1 // 3
+            if emt_gpr_1 // 3 >= del_grip + 1:  # Update index of emt_gpr after deletion
+                emt_gpr_1 = emt_gpr_1 - 3
+            if emt_gpr_2 // 3 >= del_grip + 1:
+                emt_gpr_2 = emt_gpr_2 - 3
             self.grippers[3 * del_grip : 3 * del_grip + 3] = []
             for i in range(3 * (self.w + self.v)):
                 if self.grippers[i] >= 3 * del_grip + 3:
@@ -420,9 +425,11 @@ class TMRC:
             
             self.c = self.c - 1
             grip_1 = emt_gpr_1 // 3
-            new_leaf_1 = -emt_gpr_1 - 1
+            ge = self.gripper2module[emt_gpr_1]
+            new_leaf_1 = -(2 * (ge // 2) + 1 - ge % 2) - 1
             grip_2 = emt_gpr_2 // 3
-            new_leaf_2 = -emt_gpr_2 - 2
+            ge = self.gripper2module[emt_gpr_2]
+            new_leaf_2 = -(2 * (ge // 2) + 1 - ge % 2) - 1
             self.G.remove_node(del_grip)
             self.G.add_edge(grip_1, new_leaf_1, key=0, module=module_1)
             self.G.add_edge(grip_2, new_leaf_2, key=0, module=module_2)
