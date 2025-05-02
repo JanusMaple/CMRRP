@@ -512,9 +512,9 @@ class TMRC:
             for i in range(len(self.mdl_cycles)):
                 mdl_cycle = self.mdl_cycles[i]
                 num_grips = len(mdl_cycle) // 2
-                for j in range(num_grips):
+                for j in range(num_grips + 1):
                     if mdl_cycle[2 * j] >= grip:
-                        mdl_cycle[2 * j] = mdl_cycle[2 * j] - 3
+                        mdl_cycle[2 * j] = mdl_cycle[2 * j] - 1
             self.grip_cycles = [self.get_grip_cycle(c) for c in self.mdl_cycles]
             self.real_cycles = [self.get_real_cycle(c) for c in self.mdl_cycles]
     
