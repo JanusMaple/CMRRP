@@ -303,11 +303,14 @@ class TMRC:
         return gns
     
     # Execute an action on topological level
+    # Return: [cyc_status, cyc_status, ..., cyc_status] or cyc_idx
+    #   cyc_status: -1: Deleted; 0: Unchanged; 1: Altered
+    #   cyc_idx: Index of the new cycle
     def execute_action(self, action):
         if isinstance(action, tuple):
-            TMRC._execute_grasping(self, action[0], action[1], action[2])
+            return TMRC._execute_grasping(self, action[0], action[1], action[2])
         else:
-            TMRC._execute_releasing(self, action)
+            return TMRC._execute_releasing(self, action)
 
     # gf (2 * mdl + ht) grasps gt (2 * mdl + ht)
     def _execute_grasping(self, gf, gt, gp):
@@ -368,6 +371,8 @@ class TMRC:
             self.grip_cycles.append(grip_cycle)
             self.is_grip_w.append(False)
 
+        return self.c - 1
+
     # Release the grasp of gb (2 * mdl + ht)
     def _execute_releasing(self, gb):
         if self.is_grip_w[self.module2gripper[gb % 2][gb // 2] // 3]:
@@ -392,7 +397,7 @@ class TMRC:
                     break
             self.G.remove_edge(grip_1, grip_2, key=key)
             self.G.add_edge(grip_2, new_grip, key=0, module=gb // 2)
-            self._update_cycles_wo(gb // 2)
+            cyc_status = self._update_cycles_wo(gb // 2)
             self.is_grip_w[rls_gripper // 3] = False
         else:
             self.v = self.v - 1
@@ -441,11 +446,14 @@ class TMRC:
                 relabel_mapping[i] = i - 1
             nx.relabel_nodes(self.G, relabel_mapping, copy=False)
             # Update Cycles
-            self._update_cycles_wo(None, del_grip)
+            cyc_status = self._update_cycles_wo(None, del_grip)
             # Update is_grip_w
             self.is_grip_w[del_grip : del_grip + 1] = []
 
+        return cyc_status
+
     def _update_cycles_wo(self, module, grip = None):
+        cyc_status = [0] * len(self.mdl_cycles)
         if grip is None:                                            # Release w-grip
             cyc_idxes = []                                          # Deleted cycles
             mdl_idxes = []                                          # Index of the mdl
@@ -529,6 +537,11 @@ class TMRC:
                         mdl_cycle[2 * j] = mdl_cycle[2 * j] - 1
             self.grip_cycles = [self.get_grip_cycle(c) for c in self.mdl_cycles]
             self.real_cycles = [self.get_real_cycle(c) for c in self.mdl_cycles]
+
+        for cyc_idx in cyc_idxes:
+            cyc_status[cyc_idx] = 1
+        cyc_status[min_cyc_idx] = -1
+        return cyc_status
     
     # Print w-grip modules
     def print_w_grip_modules(self):

@@ -362,9 +362,11 @@ class EMRC(TMRC):
         return actions
     
     def execute_action(self, action):
-        super().execute_action(action)
+        cyc_status = super().execute_action(action)
+        print(f"cyc_status: {cyc_status}")
         if isinstance(action, tuple):
-            EMRC._execute_grasping(self, action[0], action[1], action[2], action[3], action[4])
+            EMRC._execute_grasping(
+                self, action[0], action[1], action[2], action[3], action[4])
         else:
             EMRC._execute_releasing(self, action)
 
