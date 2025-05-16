@@ -359,7 +359,7 @@ class EMRC(TMRC):
         if isinstance(action, tuple):                   # action: tuple; cyc_status: int
             EMRC._execute_grasping(self, action[3], cyc_status, grip_status)
         else:                                           # action: int; cyc_status: list
-            EMRC._execute_releasing(self, action, cyc_status, grip_status)
+            EMRC._execute_releasing(self, cyc_status, grip_status)
 
     def _execute_grasping(self, pp, cs, gs):
         self.module_loops.append(self.get_module_loop(self.real_cycles[cs]))
@@ -378,7 +378,7 @@ class EMRC(TMRC):
         else:                                           # Forming a v-grip
             self.grip_polarities.append(0)
 
-    def _execute_releasing(self, gb, cs, gs):
+    def _execute_releasing(self, cs, gs):
         adb = 0                                         # After deletion bias, 0 or -1
         del_cyc_idx = -1
         for i in range(len(cs)):                        # The original cyc_list length
@@ -396,6 +396,8 @@ class EMRC(TMRC):
         self.grasp_loops[del_cyc_idx : del_cyc_idx + 1] = []
         self.grasp_dir_loops[del_cyc_idx : del_cyc_idx + 1] = []
         
+        # NOTE: Altering cycles does not affect polarities
+        self.loop_polarities[del_cyc_idx : del_cyc_idx + 1] = []
         if gs[1] == 0:                                  # Releasing a w-grip
             self.grip_polarities[gs[0]] = 0
         else:                                           # Releasing a v-grip
