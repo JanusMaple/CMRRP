@@ -24,13 +24,12 @@ class GMRC(EMRC):
     plg_axs_place = [(0, 0.77), (1, 0.5), (2, 0.5), (3, 0.5), (4, 0.23)]
 
     def __init__(self, w, v, n, m, grippers, gripper2module, module2gripper, rng,
-                 module_polarities = None, 
                  loop_polarities = None, 
                  grip_polarities = None, 
                  bending_angles = None, 
                  grasping_angles = None): 
         super().__init__(w, v, n, m, grippers, gripper2module, module2gripper, rng, 
-                         module_polarities, loop_polarities, grip_polarities)
+                         loop_polarities, grip_polarities)
 
         # NOTE: All ancillary properties are here to use for angle optimization
         # Number of different objects forming all loops

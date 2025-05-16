@@ -12,11 +12,6 @@ class EMRC(TMRC):
     
     Parameters
     ----------
-    module_polarities: [int, int, ..., int]; size is m
-        0: not in loop \n
-        1: h-t in 360 loop or t-h in -360 loop \n
-        -1: otherwise \n
-
     loop_polarities: [int, int, ..., int]; size is c
         0: to be decided \n
         1: 360 loop (counterclockwise) \n
@@ -31,9 +26,7 @@ class EMRC(TMRC):
         Reason: gamma_1 + 180 + gamma_2 + 180 + gamma_3 + 180 = 360 (cc) or 720 (c) \n
     """
     def __init__(self, w, v, n, m, grippers, gripper2module, module2gripper, rng,
-                 module_polarities = None, 
-                 loop_polarities = None, 
-                 grip_polarities = None):
+                 loop_polarities = None, grip_polarities = None):
         super().__init__(w, v, n, m, grippers, gripper2module, module2gripper, rng)
         
         self.module_loops = [self.get_module_loop(c) for c in self.real_cycles]
@@ -42,13 +35,9 @@ class EMRC(TMRC):
         self.grasp_loops = [self.get_grasp_loop(c) for c in self.real_cycles]
         self.grasp_dir_loops = [self.get_grasp_dir_loop(l) for l in self.grasp_loops]
 
-        if (module_polarities is None 
-            or loop_polarities is None 
-            or grip_polarities is None):
-            self.module_polarities, self.loop_polarities, self.grip_polarities = \
-                self.get_polarities()
+        if (loop_polarities is None or grip_polarities is None):
+            self.loop_polarities, self.grip_polarities = self.get_polarities()
         else:
-            self.module_polarities = module_polarities
             self.loop_polarities = loop_polarities
             self.grip_polarities = grip_polarities
 
@@ -97,6 +86,10 @@ class EMRC(TMRC):
     
     # Try to make the minimum cycle basis exactly face cycle basis
     # Also try to put non-cyclic edges on the outer face of the embedding
+    # module_polarities: [int, int, ..., int]; size is m
+    #     0: not in loop \n
+    #     1: h-t in 360 loop or t-h in -360 loop \n
+    #     -1: otherwise \n
     def get_polarities(self):
         module_polarities = [0] * self.m
         mdl_plr_weights = [0] * self.m
@@ -157,7 +150,7 @@ class EMRC(TMRC):
                 if grip_polarities[grip] == 0:
                     grip_polarities[grip] = int(self.rng.choice([-1, 1], 1)[0])
 
-        return module_polarities, loop_polarities, grip_polarities
+        return loop_polarities, grip_polarities
     
     # Get the polarity vote of a w-grip if goes from m1 to m2
     def get_polarity_vote(self, m1, grip, m2):
@@ -364,15 +357,19 @@ class EMRC(TMRC):
     def execute_action(self, action):
         cyc_status, grip_status = super().execute_action(action)
         if isinstance(action, tuple):                   # action: tuple; cyc_status: int
-            EMRC._execute_grasping(
-                self, action[0], action[1], action[2], action[3], action[4], cyc_status)
+            EMRC._execute_grasping(self, action[3], cyc_status, grip_status)
         else:                                           # action: int; cyc_status: list
-            EMRC._execute_releasing(self, action, cyc_status)
+            EMRC._execute_releasing(self, action, cyc_status, grip_status)
 
-    def _execute_grasping(self, gf, gt, gp, pp, pv, cs):
-        pass
+    def _execute_grasping(self, pp, cs, gs):
+        self.module_loops.append(self.get_module_loop(self.real_cycles[cs]))
+        self.module_ht_loops.append(self.get_module_ht_loop(self.real_cycles[cs]))
+        self.grasp_loops.append(self.get_grasp_loop(self.real_cycles[cs]))
+        self.grasp_dir_loops.append(self.get_grasp_dir_loop(self.real_cycles[cs]))
 
-    def _execute_releasing(self, gb, cs):
+        self.loop_polarities.append([])
+
+    def _execute_releasing(self, gb, cs, gs):
         pass
     
     def print_all_directions(self):
@@ -382,7 +379,6 @@ class EMRC(TMRC):
         print(f"Grasp Directions are: {self.grasp_dir_loops}")
 
     def print_all_polarities(self):
-        print(f"Module Polarities are: {self.module_polarities}")
         print(f"Loop Polarities are: {self.loop_polarities}")
         print(f"Grip Polarities are: {self.grip_polarities}")
 
