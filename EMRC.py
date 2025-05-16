@@ -138,10 +138,10 @@ class EMRC(TMRC):
                 if self.is_grip_w[grip]:
                     if grip_polarities[grip] == 0:
                         module_1 = self.grip_cycles[i][2 * j]
-                        gripper_1 = self.get_gripper(module_1, grip) % 3
+                        gripper_1 = self.get_gripper(module_1, grip)
                         module_2 = self.grip_cycles[i][2 * j + 2]
-                        gripper_2 = self.get_gripper(module_2, grip) % 3
-                        if gripper_2 == (gripper_1 + 1) % 3:
+                        gripper_2 = self.get_gripper(module_2, grip)
+                        if gripper_2 % 3 == (gripper_1 + 1) % 3:
                             grip_polarities[grip] = -loop_polarities[i]
                         else:
                             grip_polarities[grip] = loop_polarities[i]
@@ -365,12 +365,41 @@ class EMRC(TMRC):
         self.module_loops.append(self.get_module_loop(self.real_cycles[cs]))
         self.module_ht_loops.append(self.get_module_ht_loop(self.real_cycles[cs]))
         self.grasp_loops.append(self.get_grasp_loop(self.real_cycles[cs]))
-        self.grasp_dir_loops.append(self.get_grasp_dir_loop(self.real_cycles[cs]))
+        self.grasp_dir_loops.append(self.get_grasp_dir_loop(self.grasp_loops[-1]))
 
-        self.loop_polarities.append([])
+        self.loop_polarities.append(pp)
+        if gs[1] == 0:                                  # Forming a w-grip
+            gripper_1 = self.real_cycles[cs][-4]        # Penultimate grip is new
+            gripper_2 = self.real_cycles[cs][-3]        # Penultimate grip is new
+            if gripper_2 % 3 == (gripper_1 + 1) % 3:
+                self.grip_polarities.append(-self.loop_polarities[-1])
+            else:
+                self.grip_polarities.append(self.loop_polarities[-1])
+        else:                                           # Forming a v-grip
+            self.grip_polarities.append(0)
 
     def _execute_releasing(self, gb, cs, gs):
-        pass
+        adb = 0                                         # After deletion bias, 0 or -1
+        del_cyc_idx = -1
+        for i in range(len(cs)):                        # The original cyc_list length
+            if cs[i] == 0: continue
+            if cs[i] == -1:
+                adb = -1
+                del_cyc_idx = i
+                continue
+            self.module_loops[i] = self.get_module_loop(self.real_cycles[i + adb])
+            self.module_ht_loops[i] = self.get_module_ht_loop(self.real_cycles[i + adb])
+            self.grasp_loops[i] = self.get_grasp_loop(self.real_cycles[i + adb])
+            self.grasp_dir_loops[i] = self.get_grasp_dir_loop(self.grasp_loops[i])
+        self.module_loops[del_cyc_idx : del_cyc_idx + 1] = []
+        self.module_ht_loops[del_cyc_idx : del_cyc_idx + 1] = []
+        self.grasp_loops[del_cyc_idx : del_cyc_idx + 1] = []
+        self.grasp_dir_loops[del_cyc_idx : del_cyc_idx + 1] = []
+        
+        if gs[1] == 0:                                  # Releasing a w-grip
+            self.grip_polarities[gs[0]] = 0
+        else:                                           # Releasing a v-grip
+            self.grip_polarities[gs[0] : gs[0] + 1] = []
     
     def print_all_directions(self):
         print(f"Module Loops are: {self.module_loops}")
