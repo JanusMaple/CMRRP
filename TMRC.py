@@ -303,9 +303,13 @@ class TMRC:
         return gns
     
     # Execute an action on topological level
-    # Return: [cyc_status, cyc_status, ..., cyc_status] or cyc_idx
-    #   cyc_status: -1: Deleted; 0: Unchanged; 1: Altered
+    # Return: (cyc_status, grip_status)
+    # cyc_status: [cyc_sts, cyc_sts, ..., cyc_sts]: list or cyc_idx: int
+    #   cyc_sts: -1: Deleted; 0: Unchanged; 1: Altered
     #   cyc_idx: Index of the new cycle
+    # grip_status: (grip, status): tuple
+    #   grip: The index of the grip that has been affected
+    #   status: -1: v deleted; 0: w-v switched; 1: v created
     def execute_action(self, action):
         if isinstance(action, tuple):
             return TMRC._execute_grasping(self, action[0], action[1], action[2])
@@ -324,6 +328,7 @@ class TMRC:
             self.grippers[tar_gripper] = emt_gripper
             self.gripper2module[tar_gripper] = gf
             self.module2gripper[gf % 2][gf // 2] = tar_gripper
+            grip_status = (tar_gripper // 3, 0)
 
             self.c = self.c + 1
             self.G.remove_node(-gf - 1)
@@ -353,6 +358,7 @@ class TMRC:
             self.gripper2module[gsp_gpr_2] = gt
             self.module2gripper[gf % 2][gf // 2] = gsp_gpr_1
             self.module2gripper[gt % 2][gt // 2] = gsp_gpr_2
+            grip_status = (self.w + self.v - 1, 1)
 
             self.c = self.c + 1
             self.G.remove_node(-gf - 1)
@@ -371,7 +377,7 @@ class TMRC:
             self.grip_cycles.append(grip_cycle)
             self.is_grip_w.append(False)
 
-        return self.c - 1
+        return (self.c - 1, grip_status)
 
     # Release the grasp of gb (2 * mdl + ht)
     def _execute_releasing(self, gb):
@@ -385,6 +391,7 @@ class TMRC:
             self.grippers[emt_gripper] = -1
             self.gripper2module[rls_gripper] = -1
             self.module2gripper[gb % 2][gb // 2] = -1
+            grip_status = (rls_gripper // 3, 0)
 
             self.c = self.c - 1
             grip_1 = rls_gripper // 3                               # 1 Holds Something
@@ -435,6 +442,8 @@ class TMRC:
                         self.module2gripper[ht][mdl] = -1
                     elif self.module2gripper[ht][mdl] >= 3 * del_grip + 3:
                         self.module2gripper[ht][mdl] = self.module2gripper[ht][mdl] - 3
+            grip_status = (del_grip, -1)
+            
             # Update c
             self.c = self.c - 1
             # Update G
@@ -450,7 +459,7 @@ class TMRC:
             # Update is_grip_w
             self.is_grip_w[del_grip : del_grip + 1] = []
 
-        return cyc_status
+        return (cyc_status, grip_status)
 
     def _update_cycles_wo(self, module, grip = None):
         cyc_status = [0] * len(self.mdl_cycles)

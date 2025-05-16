@@ -172,12 +172,12 @@ class EMRC(TMRC):
     # gf: 2 * module + ht, the docking starts from this gripper
     # gt: 2 * module + ht, the docking goes to this gripper, which is be grasped by gf
     # gp: grip_path [grip, module, grip, ..., module, grip]
-    #   First loop is +1 polarity and secone is -1 polarity
     #   The starting grip is the only neighbor of the leaf node gf
     #   The end grip is non-leaf node gt or the only neighbor of the leaf node gt
-    # pp: int; the path polarity, either -1 (clockwise) or +1 (conterclockwise)
-    # pv: (int, int), the path polarity and its vote counts
-    #   (-1 votes, +1 votes)
+    # pp: int, the path polarity
+    #   -1: clockwise; +1: conterclockwise
+    # pv: (int, int), the path polarity vote counts
+    #   (# of -1 votes, # of +1 votes)
     # gb: 2 * module + ht, gripper to be broken
     def get_all_actions(self):
         actions = []
@@ -275,10 +275,10 @@ class EMRC(TMRC):
                                         new_paths_to_front[idx_nf].append(new_path)
                                     elif len(new_paths_to_front[idx_nf]) == 1:
                                         new_paths_to_front[idx_nf].append(new_path)
-                                        tendacy = new_paths_to_front[idx_nf][0][1][1] \
+                                        tendency = new_paths_to_front[idx_nf][0][1][1] \
                                                 - new_paths_to_front[idx_nf][0][1][0]
                                         new_tend = votes[1] - votes[0]
-                                        if new_tend < tendacy:
+                                        if new_tend < tendency:  # Sort by tendency
                                             new_paths_to_front[idx_nf] = \
                                                 new_paths_to_front[idx_nf][::-1]
                                     else:
@@ -297,7 +297,7 @@ class EMRC(TMRC):
             for i in range(len(gps)):
                 gps[i] = grip_path[grip_ends[i]]
                 gt = gts[i]
-                one_last_vote = False
+                one_last_vote = False       # Whether has one last vote if gt is leaf
                 if self.module2gripper[gt % 2][gt // 2] < 0:
                     if self.is_grip_w[self.module2gripper[1 - gt % 2][gt // 2] // 3]:
                         one_last_vote = True
@@ -318,10 +318,10 @@ class EMRC(TMRC):
                         else:
                             vpp = vpp + 1
                     pv = (vnp, vpp)
-                    if len(gps[i]) == 1:
+                    if len(gps[i]) == 1:    # If only one path exists, 
                         actions.append((gf, gt, gp, -1, pv))
                         actions.append((gf, gt, gp, +1, pv))
-                    else:
+                    else:                   # If multiple paths exist, get two extremes
                         pp = 2 * j - 1
                         actions.append((gf, gt, gp, pp, pv))
 
@@ -362,18 +362,17 @@ class EMRC(TMRC):
         return actions
     
     def execute_action(self, action):
-        cyc_status = super().execute_action(action)
-        print(f"cyc_status: {cyc_status}")
-        if isinstance(action, tuple):
+        cyc_status, grip_status = super().execute_action(action)
+        if isinstance(action, tuple):                   # action: tuple; cyc_status: int
             EMRC._execute_grasping(
-                self, action[0], action[1], action[2], action[3], action[4])
-        else:
-            EMRC._execute_releasing(self, action)
+                self, action[0], action[1], action[2], action[3], action[4], cyc_status)
+        else:                                           # action: int; cyc_status: list
+            EMRC._execute_releasing(self, action, cyc_status)
 
-    def _execute_grasping(self, gf, gt, gp, pp, pv):
+    def _execute_grasping(self, gf, gt, gp, pp, pv, cs):
         pass
 
-    def _execute_releasing(self, gb):
+    def _execute_releasing(self, gb, cs):
         pass
     
     def print_all_directions(self):
