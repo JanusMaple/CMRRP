@@ -36,7 +36,7 @@ class GMRC(EMRC):
         self.number_module_in_loop = 0
         self.number_grasp_in_loop = 0   # Even the outgoing grasp attached to loop
         # Boundaries for x during optimization
-        self.x_boundary = []    # A list of tutples of boundaries
+        self.x_boundary = []    # A list of tuples of boundaries
         # From x index to bend_angs index or grsp_angs index
         self.xi2angi = []       # A list from x index to bend_angs or grsp_angs index
         # Relative properties for dealing with w-grip angle constraints
@@ -437,18 +437,18 @@ class GMRC(EMRC):
                     return True
         return False
 
+    # To update: bend_angs, grsp_angs, module_geometries, module_colliders
     def execute_action(self, action):
-        super().execute_action(action)
+        cyc_status, grip_status = super().execute_action(action)
         if isinstance(action, tuple):
-            GMRC._execute_grasping(self, 
-                                   action[0], action[1], action[2], action[3], action[4])
+            GMRC._execute_grasping(self, cyc_status, grip_status)
         else:
-            GMRC._execute_releasing(self, action)
+            GMRC._execute_releasing(self, cyc_status, grip_status)
 
-    def _execute_grasping(self, gf, gt, gp, pp, pv):
+    def _execute_grasping(self, cyc_status, grip_status):
         pass
 
-    def _execute_releasing(self, gb):
+    def _execute_releasing(self, cyc_status, grip_status):
         pass
 
     def print_all_angs(self):

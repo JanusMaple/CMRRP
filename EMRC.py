@@ -360,6 +360,7 @@ class EMRC(TMRC):
             EMRC._execute_grasping(self, action[3], cyc_status, grip_status)
         else:                                           # action: int; cyc_status: list
             EMRC._execute_releasing(self, cyc_status, grip_status)
+        return (cyc_status, grip_status)
 
     def _execute_grasping(self, pp, cs, gs):
         self.module_loops.append(self.get_module_loop(self.real_cycles[cs]))
