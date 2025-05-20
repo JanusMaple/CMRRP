@@ -3,7 +3,7 @@ import networkx as nx
 import matplotlib.pyplot as plt
 from scipy.optimize import minimize
 from shapely import STRtree
-from shapely.geometry import Polygon, box
+from shapely.geometry import MultiLineString, box
 
 from EMRC import EMRC
 
@@ -18,10 +18,11 @@ class GMRC(EMRC):
     num_seg_lens = 5            # Number of line segments for a module
     _mdl_seg_lens = np.array([126.383, 58, 58, 58, 126.383], dtype=np.float64)
     mdl_seg_lens = _mdl_seg_lens / np.sum(_mdl_seg_lens)    # Five segments
+    plg_axs_place =  np.array([0.77, 0.5, 0.5, 0.5, 0.23], dtype=np.float64)
+    cls_exp_ratio = 0.01        # Collision exemption ratio
 
     # place (i, r): r position of segment i
     text_place = [(0, 0.3), (2, 0.5), (4, 0.7)]
-    plg_axs_place = [(0, 0.77), (1, 0.5), (2, 0.5), (3, 0.5), (4, 0.23)]
 
     def __init__(self, w, v, n, m, grippers, gripper2module, module2gripper, rng,
                  loop_polarities = None, 
@@ -52,7 +53,7 @@ class GMRC(EMRC):
         if bending_angles is None or grasping_angles is None:
             is_planar, embedding = nx.check_planarity(self.G)   # Must be planar
             cannot_be_docked = False
-            for try_collision_free in range(10):
+            for try_collision_free in range(20):
                 self.bend_angs, self.grsp_angs = self.get_random_angles_da()
                 if cannot_be_docked or not is_planar:
                     break
@@ -391,38 +392,49 @@ class GMRC(EMRC):
                         mn_sa = ht_angle[i] + self.get_grasp_angle(gripper, gn)
                         self.update_module_geometry(mn, mn_sp, mn_sa, mn_ht)
 
-    # Get module collider, includinh bounding box and body polygon
+    # Get module collider, includinh bounding box and body linestring
     def get_module_collider(self, geometry): 
         angs, xy = GMRC.get_mdl_seg_geo(geometry[0], geometry[1], geometry[2])
 
-        num_axs_pts = len(GMRC.plg_axs_place)
-        inner_pts = np.zeros((num_axs_pts, 2))
-        outer_pts = np.zeros((num_axs_pts, 2))
+        inner_pts = np.zeros((GMRC.num_seg_lens, 2))
+        outer_pts = np.zeros((GMRC.num_seg_lens, 2))
 
-        for i in range(num_axs_pts):
-            seg_i = GMRC.plg_axs_place[i][0]
-            seg_r = GMRC.plg_axs_place[i][1]
-            inner_pts[i, 0] = xy[seg_i, 0] \
-                + np.cos(angs[seg_i]) * seg_r * GMRC.mdl_seg_lens[i] \
-                + np.sin(angs[seg_i]) * GMRC.radius_ratio
-            inner_pts[i, 1] = xy[seg_i, 1] \
-                + np.sin(angs[seg_i]) * seg_r * GMRC.mdl_seg_lens[i] \
-                - np.cos(angs[seg_i]) * GMRC.radius_ratio
-            outer_pts[i, 0] = xy[seg_i, 0] \
-                + np.cos(angs[seg_i]) * seg_r * GMRC.mdl_seg_lens[i] \
-                - np.sin(angs[seg_i]) * GMRC.radius_ratio
-            outer_pts[i, 1] = xy[seg_i, 1] \
-                + np.sin(angs[seg_i]) * seg_r * GMRC.mdl_seg_lens[i] \
-                + np.cos(angs[seg_i]) * GMRC.radius_ratio
+        cos_ang_axis = np.cos(angs) * GMRC.plg_axs_place * GMRC.mdl_seg_lens
+        sin_ang_axis = np.sin(angs) * GMRC.plg_axs_place * GMRC.mdl_seg_lens
+        cos_ang_radius = np.cos(angs) * GMRC.radius_ratio
+        sin_ang_radius = np.sin(angs) * GMRC.radius_ratio
 
-        shell = np.zeros((2 * num_axs_pts + 1, 2))
-        shell[0 : num_axs_pts, :] = inner_pts[:, :]
-        shell[num_axs_pts : 2 * num_axs_pts, :] = outer_pts[::-1, :]
-        shell[2 * num_axs_pts, :] = inner_pts[0, :]
+        inner_pts[:, 0] = xy[:-1, 0] + cos_ang_axis + sin_ang_radius
+        inner_pts[:, 1] = xy[:-1, 1] + sin_ang_axis - cos_ang_radius
+        outer_pts[:, 0] = xy[:-1, 0] + cos_ang_axis - sin_ang_radius
+        outer_pts[:, 1] = xy[:-1, 1] + sin_ang_axis + cos_ang_radius
 
-        polygon = Polygon(shell)
-        bounds = polygon.bounds
-        return (box(bounds[0], bounds[1], bounds[2], bounds[3]), polygon)
+        starting_line_seg = np.zeros((2, 2))
+        starting_line_seg[0, 0] = xy[0, 0] + \
+            np.cos(angs[0]) * GMRC.cls_exp_ratio * GMRC.mdl_seg_lens[0]
+        starting_line_seg[0, 1] = xy[0, 1] + \
+            np.sin(angs[0]) * GMRC.cls_exp_ratio * GMRC.mdl_seg_lens[0]
+        starting_line_seg[1, 0] = xy[0, 0] + \
+            np.cos(angs[0]) * GMRC.plg_axs_place[0] * GMRC.mdl_seg_lens[0]
+        starting_line_seg[1, 1] = xy[0, 1] + \
+            np.sin(angs[0]) * GMRC.plg_axs_place[0] * GMRC.mdl_seg_lens[0]
+
+        ending_line_seg = np.zeros((2, 2))
+        ending_line_seg[0, 0] = xy[-2, 0] + \
+            np.cos(angs[-1]) * GMRC.plg_axs_place[-1] * GMRC.mdl_seg_lens[-1]
+        ending_line_seg[0, 1] = xy[-2, 1] + \
+            np.sin(angs[-1]) * GMRC.plg_axs_place[-1] * GMRC.mdl_seg_lens[-1]
+        ending_line_seg[1, 0] = xy[-2, 0] + \
+            np.cos(angs[-1]) * (1 - GMRC.cls_exp_ratio) * GMRC.mdl_seg_lens[-1]
+        ending_line_seg[1, 1] = xy[-2, 1] + \
+            np.sin(angs[-1]) * (1 - GMRC.cls_exp_ratio) * GMRC.mdl_seg_lens[-1]
+
+        linestring_1 = np.vstack((starting_line_seg, outer_pts, ending_line_seg[0, :]))
+        linestring_2 = np.vstack((starting_line_seg[1, :], inner_pts, ending_line_seg))
+
+        mls = MultiLineString([linestring_1, linestring_2])
+        bounds = mls.bounds
+        return (box(bounds[0], bounds[1], bounds[2], bounds[3]), mls)
 
     # Detect collision between all modules
     def is_collision_detected(self):
@@ -483,8 +495,9 @@ class GMRC(EMRC):
                 mn, 
                 g2n
             )
-            ax.plot(*self.module_colliders[i][1].exterior.xy, 
-                    color = 'b')
+            for line in self.module_colliders[i][1].geoms:
+                x, y = line.xy
+                ax.plot(x, y, color = 'b')
 
     def print_all(self):
         print("-----------------------------------------------------------------")
@@ -510,9 +523,8 @@ class GMRC(EMRC):
         xy = np.zeros((GMRC.num_seg_lens + 1, 2))
         xy[:, 0] = xy[:, 0] + sp[0]
         xy[:, 1] = xy[:, 1] + sp[1]
-        for i in range(GMRC.num_seg_lens):
-            xy[i + 1:, 0] = xy[i + 1:, 0] + np.cos(angs[i]) * GMRC.mdl_seg_lens[i]
-            xy[i + 1:, 1] = xy[i + 1:, 1] + np.sin(angs[i]) * GMRC.mdl_seg_lens[i]
+        xy[1:, 0] = xy[1:, 0] + np.cumsum(np.cos(angs) * GMRC.mdl_seg_lens)
+        xy[1:, 1] = xy[1:, 1] + np.cumsum(np.sin(angs) * GMRC.mdl_seg_lens)
         return (angs, xy)
 
     @staticmethod
