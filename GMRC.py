@@ -61,9 +61,9 @@ class GMRC(EMRC):
                     error = 1
                     for try_docking_loops in range(3):
                         x0 = self.initialize_x()    # Initialize all variables
-                        x0 = self.optim_angles_la(x0)
-                        x = self.optim_angles_ld(x0)
-                        error = self.get_loop_dock_error(x)
+                        x0 = self.optim_angles_la_x(x0)
+                        x = self.optim_angles_ld_x(x0)
+                        error = self.get_loop_dock_error_x(x)
                         if error > 1e-3:
                             self.bend_angs, self.grsp_angs = self.get_random_angles_da()
                         else:
@@ -184,47 +184,47 @@ class GMRC(EMRC):
                     self.xi2angi[gi2xi[i]] = 3 * i
         return x0
     
-    # Optimize angles to minimize loop-angle and w_grip_angle error
-    def optim_angles_la(self, x0):
+    # Optimize angles in x to minimize loop-angle and w_grip_angle error
+    def optim_angles_la_x(self, x0):
         if len(self.xi_wf) > 0:
             constraints = [
                 {
                     'type': 'eq', 
-                    'fun': self.get_w_grip_angle_error
+                    'fun': self.get_w_grip_angle_error_x
                 }
             ]
         else:
             constraints = []
         result = minimize(
-            self.get_loop_angle_error, 
+            self.get_loop_angle_error_x, 
             x0, 
             method='SLSQP', 
             constraints=constraints, 
             bounds=self.x_boundary)
         return result.x
     
-    # Optimize angles to minimize loop-dock error
-    def optim_angles_ld(self, x0):
+    # Optimize angles in x to minimize loop-dock error
+    def optim_angles_ld_x(self, x0):
         if len(self.xi_wf) > 0:
             constraints = [
                 {
                     'type': 'eq', 
-                    'fun': self.get_w_grip_angle_error
+                    'fun': self.get_w_grip_angle_error_x
                 }, 
                 {
                     'type': 'eq', 
-                    'fun': self.get_loop_angle_error
+                    'fun': self.get_loop_angle_error_x
                 }
             ]
         else:
             constraints = [
                 {
                     'type': 'eq', 
-                    'fun': self.get_loop_angle_error
+                    'fun': self.get_loop_angle_error_x
                 }
             ]
         result = minimize(
-            self.get_loop_dock_error, 
+            self.get_loop_dock_error_x, 
             x0, 
             method='SLSQP', 
             constraints=constraints, 
@@ -232,7 +232,7 @@ class GMRC(EMRC):
         return result.x
     
     # Get w-grip angle error (from 360 or 720 depending on the direction)
-    def get_w_grip_angle_error(self, x):
+    def get_w_grip_angle_error_x(self, x):
         error = 0.0
         for i in range(len(self.xi_wf)):
             j = self.xi_wf[i]
@@ -240,7 +240,7 @@ class GMRC(EMRC):
         return error
 
     # Get loop-angle error for x
-    def get_loop_angle_error(self, x):
+    def get_loop_angle_error_x(self, x):
         error = 0
         for i in range(len(self.ba_xi_loops)):
             error = error + np.abs(
@@ -250,28 +250,13 @@ class GMRC(EMRC):
         return error
 
     # Get loop-dock error for x
-    def get_loop_dock_error(self, x, is_print = False):
+    def get_loop_dock_error_x(self, x, is_print = False):
         error = 0
         for i in range(len(self.ba_xi_loops)):
             betas = x[self.ba_xi_loops[i]] * self.bas_loops[i]
             gammas = x[self.ga_xi_loops[i]] * self.gas_loops[i]
-
             l = len(self.ba_xi_loops[i])
-            a = np.zeros((l, 1))
-            b = np.zeros((l, 1))
-            for j in range(GMRC.num_seg_lens):
-                cur_betas = betas / (GMRC.num_seg_lens - 1) * j
-                a = a + np.cos(cur_betas) * GMRC.mdl_seg_lens[j]
-                b = b + np.sin(cur_betas) * GMRC.mdl_seg_lens[j]
-            
-            beta_cml = np.cumsum(betas)
-            beta_cml = np.concatenate([np.array([0.0]), beta_cml[0 : l - 1]])
-            gamma_cml = np.cumsum(gammas) - gammas[0]
-            alphas = beta_cml + gamma_cml
-
-            delta_x = np.sum(a * np.cos(alphas) - b * np.sin(alphas))
-            delta_y = np.sum(a * np.sin(alphas) + b * np.cos(alphas))
-            error = error + np.sqrt(delta_x ** 2 + delta_y ** 2)
+            error = error + GMRC.get_single_loop_dock_error(betas, gammas, l)
             if is_print:
                 print('*********************')
                 print("Loop id: ", end='')
@@ -280,14 +265,8 @@ class GMRC(EMRC):
                 print(betas)
                 print("Grasp angles: ", end='')
                 print(gammas)
-                print("Starting angles: ", end='')
-                print(alphas)
-                print('Module a: ', end='')
-                print(a)
-                print('Module b: ', end='')
-                print(b)
                 print('Loop docking error: ', end='')
-                print((delta_x, delta_y))
+                print(GMRC.get_single_loop_dock_error(betas, gammas, l))
         if is_print:
             print('*********************')
             print('Total docking error: ', end='')
@@ -453,15 +432,19 @@ class GMRC(EMRC):
     def execute_action(self, action):
         cyc_status, grip_status = super().execute_action(action)
         if isinstance(action, tuple):
-            GMRC._execute_grasping(self, cyc_status, grip_status)
+            GMRC._execute_grasping(self, grip_status)
         else:
-            GMRC._execute_releasing(self, cyc_status, grip_status)
+            GMRC._execute_releasing(self, grip_status)
 
-    def _execute_grasping(self, cyc_status, grip_status):
+    def _execute_grasping(self, grip_status):
         pass
 
-    def _execute_releasing(self, cyc_status, grip_status):
-        pass
+    def _execute_releasing(self, grip_status):
+        if grip_status[1] == -1:    # Deleted grip_status[0]
+            self.grsp_angs[3 * grip_status[0] : 3 * grip_status[0] + 3] = []
+        else:                       # w -> v for grip_status[0]
+            self.grsp_angs[3 * grip_status[0] + 1] = 0
+            self.grsp_angs[3 * grip_status[0] + 2] = 0
 
     def print_all_angs(self):
         np.set_printoptions(precision=2, suppress=True, linewidth=1024)
@@ -516,6 +499,26 @@ class GMRC(EMRC):
         self.print_actions()
         print("-----------------------------------------------------------------")
 
+    # Get loop-dock error for a single loop
+    @staticmethod
+    def get_single_loop_dock_error(betas, gammas, l):
+        a = np.zeros((l, 1))
+        b = np.zeros((l, 1))
+        for j in range(GMRC.num_seg_lens):
+            cur_betas = betas / (GMRC.num_seg_lens - 1) * j
+            a = a + np.cos(cur_betas) * GMRC.mdl_seg_lens[j]
+            b = b + np.sin(cur_betas) * GMRC.mdl_seg_lens[j]
+        
+        beta_cml = np.cumsum(betas)
+        beta_cml = np.concatenate([np.array([0.0]), beta_cml[0 : l - 1]])
+        gamma_cml = np.cumsum(gammas) - gammas[0]
+        alphas = beta_cml + gamma_cml
+
+        delta_x = np.sum(a * np.cos(alphas) - b * np.sin(alphas))
+        delta_y = np.sum(a * np.sin(alphas) + b * np.cos(alphas))
+
+        return np.sqrt(delta_x ** 2 + delta_y ** 2)
+    
     # Get all module segment end points and module segment starting angles
     @staticmethod
     def get_mdl_seg_geo(sp, alpha, beta):
