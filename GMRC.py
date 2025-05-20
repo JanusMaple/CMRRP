@@ -42,7 +42,7 @@ class GMRC(EMRC):
         self.xi2angi = []       # A list from x index to bend_angs or grsp_angs index
         # Relative properties for dealing with w-grip angle constraints
         self.xi_wf = []         # All the indexes for the first grasps of w-grip in x
-        self.wgpa_obj = []      # w-grip angle objective (360 for cc and 720 for c)
+        self.wgpa_obj = []      # w-grip angle objective (-180 for cc and 180 for c)
         # All these lists have elements of int arrays, serving as indexes for np.array
         self.ba_xi_loops = []   # A list of lists of indexes of x for bend_angs
         self.ga_xi_loops = []   # A list of lists of indexes of x for grsp_angs
@@ -100,7 +100,8 @@ class GMRC(EMRC):
         grsp_angs = np.zeros(len(self.grippers))
         for grip in range(self.w + self.v):
             if self.is_grip_w[grip]:
-                grsp_angs[3 * grip : 3 * (grip + 1)] = self.get_random_grip_angles(grip)
+                p = self.grip_polarities[grip]  # Grip polarity decides grip type
+                grsp_angs[3 * grip : 3 * (grip + 1)] = self.get_random_grip_angles(p)
             else:
                 grsp_angs[3 * grip] = self.rng.uniform(
                     -GMRC.grsp_ang_cap, GMRC.grsp_ang_cap)
@@ -281,12 +282,12 @@ class GMRC(EMRC):
             self.grsp_angs[self.xi2angi[i]] = x[i]
 
     # Generate random angles for a w-grip with polarity
-    def get_random_grip_angles(self, grip):
+    def get_random_grip_angles(self, polarity):
         # Range of the sum of gamma1 and gamma2
-        if self.grip_polarities[grip] == 1:
+        if polarity == 1:
             gamma_sum_min = -np.pi - GMRC.grsp_ang_cap
             gamma_sum_max = -np.pi + GMRC.grsp_ang_cap
-        elif self.grip_polarities[grip] == -1:
+        elif polarity == -1:
             gamma_sum_min = np.pi - GMRC.grsp_ang_cap
             gamma_sum_max = np.pi + GMRC.grsp_ang_cap
 
@@ -298,12 +299,32 @@ class GMRC(EMRC):
         gamma2_max = min(gamma_sum_max - gamma1, GMRC.grsp_ang_cap)
         gamma2 = self.rng.uniform(gamma2_min, gamma2_max)
         
-        if self.grip_polarities[grip] == 1:
+        if polarity == 1:
             gamma3 = 2 * np.pi - (np.pi * 3) - gamma1 - gamma2  # 360 Constraint
-        elif self.grip_polarities[grip] == -1:
+        elif polarity == -1:
             gamma3 = 4 * np.pi - (np.pi * 3) - gamma1 - gamma2  # 720 Constraint
 
         return [gamma1, gamma2, gamma3]
+    
+    # Generate random angle for the new grasping angles of a w-grip from v-grip
+    def get_random_grip_angle_w_gamma1(self, gamma1, polarity):
+        if polarity == 1:
+            gamma_sum_min = -np.pi - GMRC.grsp_ang_cap
+            gamma_sum_max = -np.pi + GMRC.grsp_ang_cap
+        elif polarity == -1:
+            gamma_sum_min = np.pi - GMRC.grsp_ang_cap
+            gamma_sum_max = np.pi + GMRC.grsp_ang_cap
+        
+        gamma2_min = max(gamma_sum_min - gamma1, -GMRC.grsp_ang_cap)
+        gamma2_max = min(gamma_sum_max - gamma1, GMRC.grsp_ang_cap)
+        gamma2 = self.rng.uniform(gamma2_min, gamma2_max)
+        
+        if polarity == 1:
+            gamma3 = 2 * np.pi - (np.pi * 3) - gamma1 - gamma2  # 360 Constraint
+        elif polarity == -1:
+            gamma3 = 4 * np.pi - (np.pi * 3) - gamma1 - gamma2  # 720 Constraint
+
+        return [gamma2, gamma3]
 
     # Get grasp angle from gripper_1 to gripper_2
     def get_grasp_angle(self, g1, g2):
@@ -428,16 +449,23 @@ class GMRC(EMRC):
                     return True
         return False
 
+    # angle: A specified grasping angle for the action
     # To update: bend_angs, grsp_angs, module_geometries, module_colliders
-    def execute_action(self, action):
-        cyc_status, grip_status = super().execute_action(action)
+    def execute_action(self, action, angle = None):
+        grip_status = super().execute_action(action)
         if isinstance(action, tuple):
-            GMRC._execute_grasping(self, grip_status)
+            GMRC._execute_grasping(self, grip_status, angle)
         else:
             GMRC._execute_releasing(self, grip_status)
 
-    def _execute_grasping(self, grip_status):
-        pass
+    def _execute_grasping(self, grip_status, angle):
+        if grip_status[1] == 1:     # Created grip_status[0]
+            gamma = self.rng.uniform(-GMRC.grsp_ang_cap, GMRC.grsp_ang_cap)
+            self.grsp_angs.extend([gamma, 0.0, 0.0])
+        else:                       # v -> w for grip_status[0]
+            self.grsp_angs[3 * grip_status[0] + 1 : 3 * grip_status[0] + 3] = \
+                self.get_random_grip_angle_w_gamma1(self.grsp_angs[3 * grip_status[0]])
+            gamma = self.grsp_angs[3 * grip_status[0] + 1]
 
     def _execute_releasing(self, grip_status):
         if grip_status[1] == -1:    # Deleted grip_status[0]
