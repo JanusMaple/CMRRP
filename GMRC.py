@@ -109,8 +109,8 @@ class GMRC(EMRC):
     
     # Initialize x from angles (self.bend_angs and self.grsp_angs)
     def initialize_x(self):
-        nmil = 0
-        mi2xi = [-1] * self.m
+        nmil = 0                                            # Number of Modules in Loop
+        mi2xi = [-1] * self.m                               # Module idx to x idx
         self.ba_xi_loops = [np.zeros(len(module_loop), dtype=np.int64) 
                             for module_loop in self.module_loops]
         self.bas_loops = [np.array(module_ht_loop, dtype=np.float64) 
@@ -284,12 +284,8 @@ class GMRC(EMRC):
     # Generate random angles for a w-grip with polarity
     def get_random_grip_angles(self, polarity):
         # Range of the sum of gamma1 and gamma2
-        if polarity == 1:
-            gamma_sum_min = -np.pi - GMRC.grsp_ang_cap
-            gamma_sum_max = -np.pi + GMRC.grsp_ang_cap
-        elif polarity == -1:
-            gamma_sum_min = np.pi - GMRC.grsp_ang_cap
-            gamma_sum_max = np.pi + GMRC.grsp_ang_cap
+        gamma_sum_min = -polarity * np.pi - GMRC.grsp_ang_cap
+        gamma_sum_max = -polarity * np.pi + GMRC.grsp_ang_cap
 
         gamma1_min = max(gamma_sum_min - GMRC.grsp_ang_cap, -GMRC.grsp_ang_cap)
         gamma1_max = min(gamma_sum_max + GMRC.grsp_ang_cap, GMRC.grsp_ang_cap)
@@ -299,32 +295,19 @@ class GMRC(EMRC):
         gamma2_max = min(gamma_sum_max - gamma1, GMRC.grsp_ang_cap)
         gamma2 = self.rng.uniform(gamma2_min, gamma2_max)
         
-        if polarity == 1:
-            gamma3 = 2 * np.pi - (np.pi * 3) - gamma1 - gamma2  # 360 Constraint
-        elif polarity == -1:
-            gamma3 = 4 * np.pi - (np.pi * 3) - gamma1 - gamma2  # 720 Constraint
+        gamma3 = -polarity * np.pi - gamma1 - gamma2
 
         return [gamma1, gamma2, gamma3]
     
     # Generate random angle for the new grasping angles of a w-grip from v-grip
-    def get_random_grip_angle_w_gamma1(self, gamma1, polarity):
-        if polarity == 1:
-            gamma_sum_min = -np.pi - GMRC.grsp_ang_cap
-            gamma_sum_max = -np.pi + GMRC.grsp_ang_cap
-        elif polarity == -1:
-            gamma_sum_min = np.pi - GMRC.grsp_ang_cap
-            gamma_sum_max = np.pi + GMRC.grsp_ang_cap
+    def get_gamma2_range(self, gamma1, polarity):
+        gamma_sum_min = -polarity * np.pi - GMRC.grsp_ang_cap
+        gamma_sum_max = -polarity * np.pi + GMRC.grsp_ang_cap
         
         gamma2_min = max(gamma_sum_min - gamma1, -GMRC.grsp_ang_cap)
         gamma2_max = min(gamma_sum_max - gamma1, GMRC.grsp_ang_cap)
-        gamma2 = self.rng.uniform(gamma2_min, gamma2_max)
-        
-        if polarity == 1:
-            gamma3 = 2 * np.pi - (np.pi * 3) - gamma1 - gamma2  # 360 Constraint
-        elif polarity == -1:
-            gamma3 = 4 * np.pi - (np.pi * 3) - gamma1 - gamma2  # 720 Constraint
 
-        return [gamma2, gamma3]
+        return [gamma2_min, gamma2_max]
 
     # Get grasp angle from gripper_1 to gripper_2
     def get_grasp_angle(self, g1, g2):
@@ -458,14 +441,102 @@ class GMRC(EMRC):
         else:
             GMRC._execute_releasing(self, grip_status)
 
-    def _execute_grasping(self, grip_status, angle):
+    def _execute_grasping(self, grip_status, gamma = None):
         if grip_status[1] == 1:     # Created grip_status[0]
-            gamma = self.rng.uniform(-GMRC.grsp_ang_cap, GMRC.grsp_ang_cap)
-            self.grsp_angs.extend([gamma, 0.0, 0.0])
+            gamma_range = [-GMRC.grsp_ang_cap, GMRC.grsp_ang_cap]
+            self.grsp_angs.extend([0.0, 0.0, 0.0])
         else:                       # v -> w for grip_status[0]
-            self.grsp_angs[3 * grip_status[0] + 1 : 3 * grip_status[0] + 3] = \
-                self.get_random_grip_angle_w_gamma1(self.grsp_angs[3 * grip_status[0]])
-            gamma = self.grsp_angs[3 * grip_status[0] + 1]
+            gamma1 = self.grsp_angs[3 * grip_status[0]]
+            polarity = self.grip_polarities(grip_status[0])
+            gamma_range = self.get_gamma2_range(gamma1, polarity)
+        
+        if gamma is not None and gamma > gamma_range[0] and gamma < gamma_range[1]:
+            self._update_grsp_angs_from_gamma(gamma, grip_status)
+            is_optim_gamma = False
+        else:
+            gamma = self.rng.uniform(gamma_range[0], gamma_range[1])
+            is_optim_gamma = True
+
+        y0 = self.initialize_y(gamma, is_optim_gamma)
+        y = self.optim_angles_la_y(y0, is_optim_gamma, grip_status) # TODO
+        y = self.optim_angles_ld_y(y, is_optim_gamma, grip_status)  # TODO
+
+        self.bend_angs[self.yi2mi] = y[0 : self.number_module_in_loop]
+        if is_optim_gamma:
+            self._update_grsp_angs_from_gamma(y[-1], grip_status)
+
+    # Initialize y for optimize the docking of a grasping action
+    def initialize_y(self, gamma, is_optim_gamma):
+        nmil = 0                                        # Number of modules in loop
+        mi2yi = -np.ones(self.m, dtype=np.int64)        # From module idx to y idx
+        self.ba_yi_loops = [np.zeros(len(module_loop), dtype=np.int64) 
+                            for module_loop in self.module_loops]
+        self.bas_loops = [np.array(module_ht_loop, dtype=np.float64) 
+                          for module_ht_loop in self.module_ht_loops]
+        for i in range(len(self.module_loops)):
+            module_loop = self.module_loops[i]
+            for j in range(len(module_loop)):
+                module = module_loop[j]
+                if mi2yi[module] < 0:
+                    mi2yi[module] = nmil
+                    self.ba_yi_loops[i][j] = nmil
+                    nmil = nmil + 1
+                else:
+                    self.ba_yi_loops[i][j] = mi2yi[module]
+        self.number_module_in_loop = nmil
+
+        self.ga_gi_loops = [np.zeros(len(grasp_loop), dtype=np.int64) 
+                            for grasp_loop in self.grasp_loops]
+        self.gas_loops = [np.array(grasp_dir_loop, dtype=np.float64) 
+                          for grasp_dir_loop in self.grasp_dir_loops]
+        for i in range(len(self.grasp_loops)):
+            grasp_loop = self.grasp_loops[i]
+            for j in range(len(grasp_loop)):
+                grasp = grasp_loop[j]
+                grip = grasp[0] // 3
+                grasp_id = GMRC.grsp_identifier_2_id[grasp[0] % 3 + grasp[1] % 3 - 1]
+                self.ga_gi_loops[i][j] = 3 * grip + grasp_id
+
+        mi2yi_vi = np.where(mi2yi >= 0)[0]              # Valid idx in mi2yi
+        # NOTE: It should be "fine" to just have self.yi2mi = mi2yi_vi
+        self.yi2mi = mi2yi_vi[np.argsort(mi2yi[mi2yi_vi])]
+
+        if is_optim_gamma:
+            y0 = np.zeros(nmil + 1)
+            y0[0 : nmil] = self.bend_angs[self.yi2mi]
+            y0[-1] = gamma
+        else:
+            y0 = np.zeros(nmil)
+            y0[:] = self.bend_angs[self.yi2mi]
+        return y0
+
+    # TODO: Optimize y for meeting loop angle requirements
+    def optim_angles_la_y(self, y0, is_optim_gamma, grip_status):
+        pass
+
+    # TODO: Optimize y for docking loops
+    def optim_angles_ld_y(self, y0, is_optim_gamma, grip_status):
+        pass
+
+    # TODO: Get loop angle error for given y
+    def get_loop_angle_error_y(self, y, is_optim_gamma, grip_status):
+        if is_optim_gamma:
+            self._update_grsp_angs_from_gamma(y[-1], grip_status)
+
+    # TODO: Get loop docking error for given y
+    def get_loop_dock_error_y(self, y, is_optim_gamma, grip_status):
+        if is_optim_gamma:
+            self._update_grsp_angs_from_gamma(y[-1], grip_status)
+
+    # Update self.grsp_angles from an angle gamma and grip_status
+    def _update_grsp_angs_from_gamma(self, gamma, grip_status):
+        if grip_status[1] == 1:
+            self.grsp_angs[3 * grip_status[0]] = gamma
+        else:
+            self.grsp_angs[3 * grip_status[0] + 1] = gamma
+            self.grsp_angs[3 * grip_status[0] + 2] = \
+                -self.grip_polarities[grip_status[0]] * np.pi \
+                -self.grsp_angs[3 * grip_status[0]] - gamma
 
     def _execute_releasing(self, grip_status):
         if grip_status[1] == -1:    # Deleted grip_status[0]
