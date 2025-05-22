@@ -307,7 +307,7 @@ class GMRC(EMRC):
         gamma2_min = max(gamma_sum_min - gamma1, -GMRC.grsp_ang_cap)
         gamma2_max = min(gamma_sum_max - gamma1, GMRC.grsp_ang_cap)
 
-        return [gamma2_min, gamma2_max]
+        return (gamma2_min, gamma2_max)
 
     # Get grasp angle from gripper_1 to gripper_2
     def get_grasp_angle(self, g1, g2):
@@ -441,10 +441,23 @@ class GMRC(EMRC):
         else:
             GMRC._execute_releasing(self, grip_status)
 
+    # If gamma is None or out of boundary, then feel free to optimize gamma
     def _execute_grasping(self, grip_status, gamma = None):
+        y0, is_optim_gamma = self.initialize_y(grip_status, gamma)
+        
+        y = self.optim_angles_la_y(y0, is_optim_gamma, grip_status)
+        y = self.optim_angles_ld_y(y, is_optim_gamma, grip_status)
+
+        self.bend_angs[self.yi2mi] = y[0 : self.number_module_in_loop]  # bend_angs
+        if is_optim_gamma:
+            self._update_grsp_angs_from_gamma(y[-1], grip_status)       # grsp_angs
+        self.update_all_module_geometry()                               # Geometries
+
+    # Initialize y for optimize the docking of a grasping action
+    def initialize_y(self, grip_status, gamma):
         if grip_status[1] == 1:     # Created grip_status[0]
-            gamma_range = [-GMRC.grsp_ang_cap, GMRC.grsp_ang_cap]
-            self.grsp_angs.extend([0.0, 0.0, 0.0])
+            gamma_range = (-GMRC.grsp_ang_cap, GMRC.grsp_ang_cap)
+            self.grsp_angs.extend([0.0, 0.0, 0.0])          # NOTE: Extension is needed
         else:                       # v -> w for grip_status[0]
             gamma1 = self.grsp_angs[3 * grip_status[0]]
             polarity = self.grip_polarities(grip_status[0])
@@ -457,16 +470,6 @@ class GMRC(EMRC):
             gamma = self.rng.uniform(gamma_range[0], gamma_range[1])
             is_optim_gamma = True
 
-        y0 = self.initialize_y(gamma, is_optim_gamma)
-        y = self.optim_angles_la_y(y0, is_optim_gamma, grip_status) # TODO
-        y = self.optim_angles_ld_y(y, is_optim_gamma, grip_status)  # TODO
-
-        self.bend_angs[self.yi2mi] = y[0 : self.number_module_in_loop]
-        if is_optim_gamma:
-            self._update_grsp_angs_from_gamma(y[-1], grip_status)
-
-    # Initialize y for optimize the docking of a grasping action
-    def initialize_y(self, gamma, is_optim_gamma):
         nmil = 0                                        # Number of modules in loop
         mi2yi = -np.ones(self.m, dtype=np.int64)        # From module idx to y idx
         self.ba_yi_loops = [np.zeros(len(module_loop), dtype=np.int64) 
@@ -501,32 +504,71 @@ class GMRC(EMRC):
         # NOTE: It should be "fine" to just have self.yi2mi = mi2yi_vi
         self.yi2mi = mi2yi_vi[np.argsort(mi2yi[mi2yi_vi])]
 
+        self.y_boundary = [(-GMRC.mdl_ang_cap, GMRC.mdl_ang_cap)] \
+            * self.number_module_in_loop
         if is_optim_gamma:
             y0 = np.zeros(nmil + 1)
             y0[0 : nmil] = self.bend_angs[self.yi2mi]
             y0[-1] = gamma
+            self.y_boundary.append(gamma_range)
         else:
             y0 = np.zeros(nmil)
             y0[:] = self.bend_angs[self.yi2mi]
-        return y0
+        return (y0, is_optim_gamma)
 
-    # TODO: Optimize y for meeting loop angle requirements
-    def optim_angles_la_y(self, y0, is_optim_gamma, grip_status):
-        pass
+    # Optimize y for meeting loop angle requirements
+    def optim_angles_la_y(self, y0, is_optim_gamma = False, grip_status = None):
+        result = minimize(
+            self.get_loop_angle_error_y,
+            y0,
+            args=(is_optim_gamma, grip_status),
+            method = 'SLSQP',
+            bounds=self.y_boundary
+        )
+        return result.x
 
-    # TODO: Optimize y for docking loops
-    def optim_angles_ld_y(self, y0, is_optim_gamma, grip_status):
-        pass
+    # Optimize y for docking loops
+    def optim_angles_ld_y(self, y0, is_optim_gamma = False, grip_status = None):
+        constraints = [
+            {
+                'type': 'eq',
+                'fun': self.get_loop_angle_error_y,
+                'args': (is_optim_gamma, grip_status)
+            }
+        ]
+        result = minimize(
+            self.get_loop_dock_error_y,
+            y0,
+            args=(is_optim_gamma, grip_status),
+            method = 'SLSQP',
+            constraints=constraints,
+            bounds=self.y_boundary
+        )
+        return result.x
 
-    # TODO: Get loop angle error for given y
-    def get_loop_angle_error_y(self, y, is_optim_gamma, grip_status):
+    # Get loop angle error for given y
+    def get_loop_angle_error_y(self, y, is_optim_gamma = False, grip_status = None):
         if is_optim_gamma:
             self._update_grsp_angs_from_gamma(y[-1], grip_status)
+        error = 0
+        for i in range(len(self.ba_yi_loops)):
+            betas = y[self.ba_yi_loops[i]] * self.bas_loops[i]
+            gammas = self.grsp_angs[self.ga_gi_loops[i]] * self.gas_loops[i]
+            ang_sum_tar = -self.loop_polarities[i] * 2 * np.pi
+            error = error + np.abs(np.sum(betas) + np.sum(gammas) - ang_sum_tar)
+        return error
 
-    # TODO: Get loop docking error for given y
-    def get_loop_dock_error_y(self, y, is_optim_gamma, grip_status):
+    # Get loop docking error for given y
+    def get_loop_dock_error_y(self, y, is_optim_gamma = False, grip_status = None):
         if is_optim_gamma:
             self._update_grsp_angs_from_gamma(y[-1], grip_status)
+        error = 0
+        for i in range(len(self.ba_yi_loops)):
+            betas = y[self.ba_yi_loops[i]] * self.bas_loops[i]
+            gammas = self.grsp_angs[self.ga_gi_loops[i]] * self.gas_loops[i]
+            l = len(self.ba_yi_loops[i])
+            error = error + GMRC.get_single_loop_dock_error(betas, gammas, l)
+        return error
 
     # Update self.grsp_angles from an angle gamma and grip_status
     def _update_grsp_angs_from_gamma(self, gamma, grip_status):
