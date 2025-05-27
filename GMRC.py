@@ -457,10 +457,10 @@ class GMRC(EMRC):
     def initialize_y(self, grip_status, gamma):
         if grip_status[1] == 1:     # Created grip_status[0]
             gamma_range = (-GMRC.grsp_ang_cap, GMRC.grsp_ang_cap)
-            self.grsp_angs.extend([0.0, 0.0, 0.0])          # NOTE: Extension is needed
+            self.grsp_angs = np.append(self.grsp_angs, [0.0, 0.0, 0.0])
         else:                       # v -> w for grip_status[0]
             gamma1 = self.grsp_angs[3 * grip_status[0]]
-            polarity = self.grip_polarities(grip_status[0])
+            polarity = self.grip_polarities[grip_status[0]]
             gamma_range = self.get_gamma2_range(gamma1, polarity)
         
         if gamma is not None and gamma > gamma_range[0] and gamma < gamma_range[1]:
@@ -554,7 +554,7 @@ class GMRC(EMRC):
         for i in range(len(self.ba_yi_loops)):
             betas = y[self.ba_yi_loops[i]] * self.bas_loops[i]
             gammas = self.grsp_angs[self.ga_gi_loops[i]] * self.gas_loops[i]
-            ang_sum_tar = -self.loop_polarities[i] * 2 * np.pi
+            ang_sum_tar = self.loop_polarities[i] * 2 * np.pi
             error = error + np.abs(np.sum(betas) + np.sum(gammas) - ang_sum_tar)
         return error
 
@@ -582,7 +582,8 @@ class GMRC(EMRC):
 
     def _execute_releasing(self, grip_status):
         if grip_status[1] == -1:    # Deleted grip_status[0]
-            self.grsp_angs[3 * grip_status[0] : 3 * grip_status[0] + 3] = []
+            self.grsp_angs = np.delete(self.grsp_angs, 
+                      list(range(3 * grip_status[0], 3 * grip_status[0] + 3)))
         else:                       # w -> v for grip_status[0]
             self.grsp_angs[3 * grip_status[0] + 1] = 0
             self.grsp_angs[3 * grip_status[0] + 2] = 0

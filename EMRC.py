@@ -312,8 +312,13 @@ class EMRC(TMRC):
                             vpp = vpp + 1
                     pv = (vnp, vpp)
                     if len(gps[i]) == 1:    # If only one path exists, 
-                        actions.append((gf, gt, gp, -1, pv))
-                        actions.append((gf, gt, gp, +1, pv))
+                        if pv[0] > 0 and pv[1] == 0:
+                            actions.append((gf, gt, gp, -1, pv))
+                        elif pv[1] > 0 and pv[0] == 0:
+                            actions.append((gf, gt, gp, +1, pv))
+                        else:
+                            actions.append((gf, gt, gp, -1, pv))
+                            actions.append((gf, gt, gp, +1, pv))
                     else:                   # If multiple paths exist, get two extremes
                         pp = 2 * j - 1
                         actions.append((gf, gt, gp, pp, pv))
@@ -372,18 +377,19 @@ class EMRC(TMRC):
         if gs[1] == 0:                                  # Forming a w-grip
             gripper_1 = self.real_cycles[cs][-4]        # Penultimate grip is new
             gripper_2 = self.real_cycles[cs][-3]        # Penultimate grip is new
+            grip = gripper_1 // 3
             if gripper_2 % 3 == (gripper_1 + 1) % 3:
-                self.grip_polarities.append(-self.loop_polarities[-1])
+                self.grip_polarities[grip] = -self.loop_polarities[-1]
             else:
-                self.grip_polarities.append(self.loop_polarities[-1])
+                self.grip_polarities[grip] = self.loop_polarities[-1]
         else:                                           # Forming a v-grip
             self.grip_polarities.append(0)
 
     def _execute_releasing(self, cs, gs):
+        print(cs)
         adb = 0                                         # After deletion bias, 0 or -1
         del_cyc_idx = -1
         for i in range(len(cs)):                        # The original cyc_list length
-            if cs[i] == 0: continue
             if cs[i] == -1:
                 adb = -1
                 del_cyc_idx = i
