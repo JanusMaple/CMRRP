@@ -432,26 +432,58 @@ class GMRC(EMRC):
                     return True
         return False
 
+    # Get all actions using emrc.get_all_actions()
+    # Delete all actions that conflict grasping angle constraints
+    def get_all_actions(self):
+        actions = super().get_all_actions()
+        act_idx_to_del = []
+        for i in range(len(actions)):
+            action = actions[i]
+            if isinstance(action, tuple):                       # If grasp
+                gt = action[1]
+                if self.module2gripper[gt % 2][gt // 2] >= 0:   # If grasp a v-grip
+                    path_polarity = action[3]
+                    grsped_gripper = self.get_gripper(action[2][-2], action[2][-1])
+                    if grsped_gripper % 3 == 0:
+                        grip_polarity = path_polarity
+                    else:
+                        grip_polarity = -path_polarity
+                    gamma_v = self.grsp_angs[3 * action[2][-1]]
+                    gamma_range = self.get_gamma2_range(gamma_v, grip_polarity)
+                    if gamma_range[0] > gamma_range[1]:
+                        act_idx_to_del = [i] + act_idx_to_del   # Inverse order
+        for i in act_idx_to_del:
+            actions[i : i + 1] = []
+        return actions
+
     # angle: A specified grasping angle for the action
     # To update: bend_angs, grsp_angs, module_geometries, module_colliders
     def execute_action(self, action, angle = None):
         grip_status = super().execute_action(action)
         if isinstance(action, tuple):
-            GMRC._execute_grasping(self, grip_status, angle)
+            result = GMRC._execute_grasping(self, grip_status, angle)
         else:
             GMRC._execute_releasing(self, grip_status)
+            result = False
+        return result
 
     # If gamma is None or out of boundary, then feel free to optimize gamma
     def _execute_grasping(self, grip_status, gamma = None):
         y0, is_optim_gamma = self.initialize_y(grip_status, gamma)
         
         y = self.optim_angles_la_y(y0, is_optim_gamma, grip_status)
-        y = self.optim_angles_ld_y(y, is_optim_gamma, grip_status)
+        y, error = self.optim_angles_ld_y(y, is_optim_gamma, grip_status)
 
         self.bend_angs[self.yi2mi] = y[0 : self.number_module_in_loop]  # bend_angs
         if is_optim_gamma:
             self._update_grsp_angs_from_gamma(y[-1], grip_status)       # grsp_angs
         self.update_all_module_geometry()                               # Geometries
+        
+        is_success = True
+        if error > 1e-1:
+            print("\033[91mAction Failed\033[0m: Failed to dock the new loop!")
+            is_success = False
+        return is_success
 
     # Initialize y for optimize the docking of a grasping action
     def initialize_y(self, grip_status, gamma):
@@ -544,7 +576,7 @@ class GMRC(EMRC):
             constraints=constraints,
             bounds=self.y_boundary
         )
-        return result.x
+        return (result.x, result.fun)
 
     # Get loop angle error for given y
     def get_loop_angle_error_y(self, y, is_optim_gamma = False, grip_status = None):

@@ -41,8 +41,6 @@ class EMRC(TMRC):
             self.loop_polarities = loop_polarities
             self.grip_polarities = grip_polarities
 
-        self.actions = self.get_all_actions()
-
     # [m0, m1, ..., mc], if mi > 0 than it is from head to tail; otherwise tail to head
     def get_module_loop(self, real_cycle):
         module_loop = [0] * (len(real_cycle) // 3)
@@ -386,7 +384,6 @@ class EMRC(TMRC):
             self.grip_polarities.append(0)
 
     def _execute_releasing(self, cs, gs):
-        print(cs)
         adb = 0                                         # After deletion bias, 0 or -1
         del_cyc_idx = -1
         for i in range(len(cs)):                        # The original cyc_list length
