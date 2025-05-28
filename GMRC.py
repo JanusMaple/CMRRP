@@ -59,9 +59,13 @@ class GMRC(EMRC):
         if bending_angles is None or grasping_angles is None:
             is_planar, embedding = nx.check_planarity(self.G)   # Must be planar
             cannot_be_docked = False
-            for try_collision_free in range(20):
+            for try_collision_free in range(10):
                 self.bend_angs, self.grsp_angs = self.get_random_angles_da()
-                if cannot_be_docked or not is_planar:
+                if cannot_be_docked:
+                    print('\033[91mFailed for Docking Loops :(\033[0m')
+                    break
+                elif not is_planar:
+                    print('\033[91mThe Graph is Not Planar :(\033[0m')
                     break
                 if len(self.module_loops) > 0:              # If the graph is not acyclic
                     error = 1
@@ -80,13 +84,8 @@ class GMRC(EMRC):
                 self.update_all_module_geometry_collider()  # Update geometry & collider
                 if not self.is_collision_detected():
                     break                                   # Until no collision
-            else:
-                if cannot_be_docked:
-                    print('\033[91mFailed for Docking Loops :(\033[0m')
-                elif not is_planar:
-                    print('\033[91mThe Graph is Not Planar :(\033[0m')
-                else:
-                    print('\033[91mFailed for Finding Collision-Free Layout :(\033[0m')
+            else:                                           # Cannot break the loop
+                print('\033[91mFailed for Finding Collision-Free Layout :(\033[0m')
         else:
             self.bend_angs = bending_angles
             self.grsp_angs = grasping_angles
@@ -429,7 +428,7 @@ class GMRC(EMRC):
         y = self.optim_angles_la_y(y0, is_optim_gamma, grip_status)
         y, error = self.optim_angles_ld_y(y, is_optim_gamma, grip_status)
 
-        self.bend_angs[self.yi2mi] = y[0 : self.number_module_in_loop]  # bend_angs
+        self.bend_angs = y[0 : self.m]                                  # bend_angs
         if is_optim_gamma:
             self._update_grsp_angs_from_gamma(y[-1], grip_status)       # grsp_angs
         self.update_all_module_geometry_collider()                      # Geometries
@@ -457,23 +456,10 @@ class GMRC(EMRC):
             gamma = self.rng.uniform(gamma_range[0], gamma_range[1])
             is_optim_gamma = True
 
-        nmil = 0                                        # Number of modules in loop
-        mi2yi = -np.ones(self.m, dtype=np.int64)        # From module idx to y idx
-        self.ba_yi_loops = [np.zeros(len(module_loop), dtype=np.int64) 
+        self.ba_yi_loops = [np.array(module_loop, dtype=np.int64) 
                             for module_loop in self.module_loops]
         self.bas_loops = [np.array(module_ht_loop, dtype=np.float64) 
                           for module_ht_loop in self.module_ht_loops]
-        for i in range(len(self.module_loops)):
-            module_loop = self.module_loops[i]
-            for j in range(len(module_loop)):
-                module = module_loop[j]
-                if mi2yi[module] < 0:
-                    mi2yi[module] = nmil
-                    self.ba_yi_loops[i][j] = nmil
-                    nmil = nmil + 1
-                else:
-                    self.ba_yi_loops[i][j] = mi2yi[module]
-        self.number_module_in_loop = nmil
 
         self.ga_gi_loops = [np.zeros(len(grasp_loop), dtype=np.int64) 
                             for grasp_loop in self.grasp_loops]
@@ -487,20 +473,16 @@ class GMRC(EMRC):
                 grasp_id = GMRC.grsp_identifier_2_id[grasp[0] % 3 + grasp[1] % 3 - 1]
                 self.ga_gi_loops[i][j] = 3 * grip + grasp_id
 
-        mi2yi_vi = np.where(mi2yi >= 0)[0]              # Valid idx in mi2yi
-        # NOTE: It should be "fine" to just have self.yi2mi = mi2yi_vi
-        self.yi2mi = mi2yi_vi[np.argsort(mi2yi[mi2yi_vi])]
+        self.y_boundary = [(-GMRC.mdl_ang_cap, GMRC.mdl_ang_cap)] * self.m
 
-        self.y_boundary = [(-GMRC.mdl_ang_cap, GMRC.mdl_ang_cap)] \
-            * self.number_module_in_loop
         if is_optim_gamma:
-            y0 = np.zeros(nmil + 1)
-            y0[0 : nmil] = self.bend_angs[self.yi2mi]
+            y0 = np.zeros(self.m + 1)
+            y0[0 : self.m] = self.bend_angs
             y0[-1] = gamma
             self.y_boundary.append(gamma_range)
         else:
-            y0 = np.zeros(nmil)
-            y0[:] = self.bend_angs[self.yi2mi]
+            y0 = np.zeros(self.m)
+            y0[:] = self.bend_angs
         return (y0, is_optim_gamma)
 
     # Optimize y for meeting loop angle requirements
@@ -534,7 +516,7 @@ class GMRC(EMRC):
         return (result.x, result.fun)
 
     # Get loop angle error for given y
-    def get_loop_angle_error_y(self, y, is_optim_gamma = False, grip_status = None):
+    def get_loop_angle_error_y(self, y, is_optim_gamma, grip_status):
         if is_optim_gamma:
             self._update_grsp_angs_from_gamma(y[-1], grip_status)
         error = 0
@@ -546,7 +528,7 @@ class GMRC(EMRC):
         return error
 
     # Get loop docking error for given y
-    def get_loop_dock_error_y(self, y, is_optim_gamma = False, grip_status = None):
+    def get_loop_dock_error_y(self, y, is_optim_gamma, grip_status):
         if is_optim_gamma:
             self._update_grsp_angs_from_gamma(y[-1], grip_status)
         error = 0
@@ -624,9 +606,6 @@ class GMRC(EMRC):
         self.print_all_polarities()
         print("-----------------------------------------------------------------")
         self.print_all_angs()
-        print("-----------------------------------------------------------------")
-        self.print_actions()
-        print("-----------------------------------------------------------------")
 
     # Get loop-dock error for a single loop
     @staticmethod

@@ -418,10 +418,11 @@ class EMRC(TMRC):
         print(f"Grip Polarities are: {self.grip_polarities}")
 
     # Print Feasible Actions (Mainly for Testing and Debugging)
-    def print_actions(self):
+    @staticmethod
+    def print_actions(actions):
         print("Available Actions are: ")
         ht_str = ["Head", "Tail"]
-        for action in self.actions:
+        for action in actions:
             if isinstance(action, tuple):
                 gf, gt, gp, pp, pv = action
                 print(f"Module {gf // 2} {ht_str[gf % 2]} Grasps ", end = "")
