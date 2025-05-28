@@ -3,7 +3,7 @@ import networkx as nx
 import matplotlib.pyplot as plt
 from scipy.optimize import minimize
 from shapely import STRtree
-from shapely.geometry import MultiLineString, box
+from shapely.geometry import MultiLineString, LineString, box
 
 from EMRC import EMRC
 
@@ -20,6 +20,8 @@ class GMRC(EMRC):
     mdl_seg_lens = _mdl_seg_lens / np.sum(_mdl_seg_lens)    # Five segments
     plg_axs_place =  np.array([0.77, 0.5, 0.5, 0.5, 0.23], dtype=np.float64)
     cls_exp_ratio = 0.01        # Collision exemption ratio
+
+    drs_dis_thd = 0.05          # Dangerous Distance Threshold
 
     # place (i, r): r position of segment i
     text_place = [(0, 0.3), (2, 0.5), (4, 0.7)]
@@ -51,7 +53,7 @@ class GMRC(EMRC):
         self.gas_loops = []     # The grasp angle sign for each grasp angle in loop
 
         # Initialize for gemetries and colliders
-        # Format: {module_index: ((x, y), alpha, beta), ...}
+        # Format: {module_index: ((x, y), alpha, beta, ht), ...}
         self.module_geometries = dict.fromkeys(range(self.m))
         # Format: [(Bounding Box, MultiLineString), ...]
         self.module_colliders = [None] * self.m
@@ -81,7 +83,8 @@ class GMRC(EMRC):
                     else:
                         cannot_be_docked = True
                     self.update_angs_from_x(x)
-                self.update_all_module_geometry_collider()  # Update geometry & collider
+                self.update_all_module_geometry()           # Update all geometries
+                self.update_all_module_collider()           # Update all colliders
                 if not self.is_collision_detected():
                     break                                   # Until no collision
             else:                                           # Cannot break the loop
@@ -89,7 +92,8 @@ class GMRC(EMRC):
         else:
             self.bend_angs = bending_angles
             self.grsp_angs = grasping_angles
-            self.update_all_module_geometry_collider()      # Update geometry & collider
+            self.update_all_module_geometry()               # Update all geometries
+            self.update_all_module_collider()               # Update all colliders
 
     # Generate random angles under dock-angle constraint
     def get_random_angles_da(self):
@@ -324,14 +328,19 @@ class GMRC(EMRC):
             else:
                 return -self.grsp_angs[g2]
             
-    # Update geometries and colliders of all modules
-    def update_all_module_geometry_collider(self):
+    # Update geometries of all modules
+    def update_all_module_geometry(self):
         self.mdl_geo_updated = [False] * self.m
-        self.update_module_geometry(0, (0, 0), 0, 0)
-        self._update_all_module_collider()
+        self._update_module_geometry(0, (0, 0), 0, 0)
+
+    # Update all module colliders
+    def update_all_module_collider(self):
+        for i in range(self.m):
+            self.module_colliders[i] = GMRC.get_module_collider(
+                self.module_geometries[i])
 
     # Update geometry recursively
-    def update_module_geometry(self, mi, sp, sa, ht):
+    def _update_module_geometry(self, mi, sp, sa, ht):
         if ht == 0:
             ar = self.bend_angs[mi]
         else:
@@ -351,7 +360,8 @@ class GMRC(EMRC):
         self.module_geometries[int(mi)] = (
             ht_position[0], 
             ht_angle[0] - np.pi,                    # Growing angle is opposite to it 
-            self.bend_angs[mi]
+            self.bend_angs[mi],
+            ht                                      # Either from head or tail
             )
         self.mdl_geo_updated[mi] = True
 
@@ -365,13 +375,7 @@ class GMRC(EMRC):
                     if not self.mdl_geo_updated[mn]:
                         mn_sp = ht_position[i]
                         mn_sa = ht_angle[i] + self.get_grasp_angle(gripper, gn)
-                        self.update_module_geometry(mn, mn_sp, mn_sa, mn_ht)
-
-    # Update all module colliders
-    def _update_all_module_collider(self):
-        for i in range(self.m):
-            self.module_colliders[i] = GMRC.get_module_collider(
-                self.module_geometries[i])
+                        self._update_module_geometry(mn, mn_sp, mn_sa, mn_ht)
 
     # Detect collision between all modules
     def is_collision_detected(self):
@@ -385,6 +389,36 @@ class GMRC(EMRC):
                 if self.module_colliders[i][1].intersects(self.module_colliders[n][1]):
                     return True
         return False
+    
+    # Get dangerous distance of the current configuration
+    # Return: float ∈ [-GMRC.drs_dis_thd, +∞); Better to be larger than zero
+    def get_dangerous_distance(self):
+        # dd_colliders[i]: (mls, hls, tls)
+        dd_colliders = self._get_dd_colliders()
+        min_dis = 1e6
+        for i in range(self.m):
+            for j in range(i + 1, self.m):
+                if self.module2gripper[0][i] // 3 == self.module2gripper[0][j] // 3:
+                    distance = dd_colliders[i][2].distance(dd_colliders[j][2])
+                elif self.module2gripper[1][i] // 3 == self.module2gripper[0][j] // 3:
+                    distance = dd_colliders[i][1].distance(dd_colliders[j][2])
+                elif self.module2gripper[0][i] // 3 == self.module2gripper[1][j] // 3:
+                    distance = dd_colliders[i][2].distance(dd_colliders[j][1])
+                elif self.module2gripper[1][i] // 3 == self.module2gripper[1][j] // 3:
+                    distance = dd_colliders[i][1].distance(dd_colliders[j][1])
+                else:
+                    distance = dd_colliders[i][0].distance(dd_colliders[j][0])
+                if distance < min_dis:
+                    min_dis = distance
+        return min_dis - GMRC.drs_dis_thd
+
+    # get necessary colliders for calculating dangerous distance
+    def _get_dd_colliders(self):
+        dd_colliders = [None] * self.m
+        for i in range(self.m):
+            geometry = self.module_geometries[i]
+            dd_colliders[i] = GMRC._get_dd_collider(geometry)
+        return dd_colliders
 
     # Get all actions using emrc.get_all_actions()
     # Delete all actions that conflict grasping angle constraints
@@ -431,7 +465,8 @@ class GMRC(EMRC):
         self.bend_angs = y[0 : self.m]                                  # bend_angs
         if is_optim_gamma:
             self._update_grsp_angs_from_gamma(y[-1], grip_status)       # grsp_angs
-        self.update_all_module_geometry_collider()                      # Geometries
+        self.update_all_module_geometry()                               # Geometries
+        self.update_all_module_collider()                               # Colliders
         
         is_success = True
         if error > 1e-1:
@@ -487,11 +522,19 @@ class GMRC(EMRC):
 
     # Optimize y for meeting loop angle requirements
     def optim_angles_la_y(self, y0, is_optim_gamma = False, grip_status = None):
+        constraints = [
+            {
+                'type': 'ineq',
+                'fun': self.get_module_collision_error_y,
+                'args': (is_optim_gamma, grip_status)
+            }
+        ]
         result = minimize(
             self.get_loop_angle_error_y,
             y0,
             args=(is_optim_gamma, grip_status),
             method = 'SLSQP',
+            constraints=constraints,
             bounds=self.y_boundary
         )
         return result.x
@@ -503,7 +546,12 @@ class GMRC(EMRC):
                 'type': 'eq',
                 'fun': self.get_loop_angle_error_y,
                 'args': (is_optim_gamma, grip_status)
-            }
+            }, 
+            {
+                'type': 'ineq',
+                'fun': self.get_module_collision_error_y,
+                'args': (is_optim_gamma, grip_status)
+            }, 
         ]
         result = minimize(
             self.get_loop_dock_error_y,
@@ -514,6 +562,14 @@ class GMRC(EMRC):
             bounds=self.y_boundary
         )
         return (result.x, result.fun)
+
+    # Get module collision error objective for given y
+    def get_module_collision_error_y(self, y, is_optim_gamma, grip_status):
+        if is_optim_gamma:
+            self._update_grsp_angs_from_gamma(y[-1], grip_status)
+        self.bend_angs = y[0 : self.m]
+        self.update_all_module_geometry()
+        return self.get_dangerous_distance()
 
     # Get loop angle error for given y
     def get_loop_angle_error_y(self, y, is_optim_gamma, grip_status):
@@ -682,6 +738,65 @@ class GMRC(EMRC):
         mls = MultiLineString([linestring_1, linestring_2])
         bounds = mls.bounds
         return (box(bounds[0], bounds[1], bounds[2], bounds[3]), mls)
+    
+    # Get module collider for dangerous distance calculation
+    # Return: (mls, hls, tls)
+    # mls: MultiLineString for the whole module shape collider
+    # hls: LineString for head shape collider
+    # tls: LineString for tail shape collider
+    @staticmethod
+    def _get_dd_collider(geometry):
+        angs, xy = GMRC.get_mdl_seg_geo(geometry[0], geometry[1], geometry[2])
+
+        inner_pts = np.zeros((GMRC.num_seg_lens, 2))
+        outer_pts = np.zeros((GMRC.num_seg_lens, 2))
+
+        cos_ang_axis = np.cos(angs) * GMRC.plg_axs_place * GMRC.mdl_seg_lens
+        sin_ang_axis = np.sin(angs) * GMRC.plg_axs_place * GMRC.mdl_seg_lens
+        cos_ang_radius = np.cos(angs) * GMRC.radius_ratio
+        sin_ang_radius = np.sin(angs) * GMRC.radius_ratio
+
+        inner_pts[:, 0] = xy[:-1, 0] + cos_ang_axis + sin_ang_radius
+        inner_pts[:, 1] = xy[:-1, 1] + sin_ang_axis - cos_ang_radius
+        outer_pts[:, 0] = xy[:-1, 0] + cos_ang_axis - sin_ang_radius
+        outer_pts[:, 1] = xy[:-1, 1] + sin_ang_axis + cos_ang_radius
+
+        starting_line_seg = np.zeros((2, 2))
+        starting_line_seg[0, 0] = xy[0, 0] + \
+            np.cos(angs[0]) * GMRC.cls_exp_ratio * GMRC.mdl_seg_lens[0]
+        starting_line_seg[0, 1] = xy[0, 1] + \
+            np.sin(angs[0]) * GMRC.cls_exp_ratio * GMRC.mdl_seg_lens[0]
+        starting_line_seg[1, 0] = xy[0, 0] + \
+            np.cos(angs[0]) * GMRC.plg_axs_place[0] * GMRC.mdl_seg_lens[0]
+        starting_line_seg[1, 1] = xy[0, 1] + \
+            np.sin(angs[0]) * GMRC.plg_axs_place[0] * GMRC.mdl_seg_lens[0]
+
+        ending_line_seg = np.zeros((2, 2))
+        ending_line_seg[0, 0] = xy[-2, 0] + \
+            np.cos(angs[-1]) * GMRC.plg_axs_place[-1] * GMRC.mdl_seg_lens[-1]
+        ending_line_seg[0, 1] = xy[-2, 1] + \
+            np.sin(angs[-1]) * GMRC.plg_axs_place[-1] * GMRC.mdl_seg_lens[-1]
+        ending_line_seg[1, 0] = xy[-2, 0] + \
+            np.cos(angs[-1]) * (1 - GMRC.cls_exp_ratio) * GMRC.mdl_seg_lens[-1]
+        ending_line_seg[1, 1] = xy[-2, 1] + \
+            np.sin(angs[-1]) * (1 - GMRC.cls_exp_ratio) * GMRC.mdl_seg_lens[-1]
+
+        linestring_1 = np.vstack((starting_line_seg, outer_pts, ending_line_seg[0, :]))
+        linestring_2 = np.vstack((starting_line_seg[1, :], inner_pts, ending_line_seg))
+        mls = MultiLineString([linestring_1, linestring_2])
+
+        start_linestring_1 = LineString(np.vstack((starting_line_seg, 
+                                                   outer_pts, 
+                                                    inner_pts[::-1, :], 
+                                                    starting_line_seg[1, :])))
+        end_linestring_2 = LineString(np.vstack((ending_line_seg[::-1, :], 
+                                                    inner_pts[::-1, :], 
+                                                    outer_pts, 
+                                                    ending_line_seg[0, :])))
+        if geometry[3] == 0:                                        # Starting from head
+            return (mls, start_linestring_1, end_linestring_2)
+        else:                                                       # Starting from tail
+            return (mls, end_linestring_2, start_linestring_1)
 
     @staticmethod
     # Input parameters: 
