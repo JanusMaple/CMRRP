@@ -50,6 +50,12 @@ class GMRC(EMRC):
         self.bas_loops = []     # The bend angle sign for each bend angle in loop
         self.gas_loops = []     # The grasp angle sign for each grasp angle in loop
 
+        # Initialize for gemetries and colliders
+        # Format: {module_index: ((x, y), alpha, beta), ...}
+        self.module_geometries = dict.fromkeys(range(self.m))
+        # Format: [(Bounding Box, MultiLineString), ...]
+        self.module_colliders = [None] * self.m
+
         if bending_angles is None or grasping_angles is None:
             is_planar, embedding = nx.check_planarity(self.G)   # Must be planar
             cannot_be_docked = False
@@ -57,27 +63,23 @@ class GMRC(EMRC):
                 self.bend_angs, self.grsp_angs = self.get_random_angles_da()
                 if cannot_be_docked or not is_planar:
                     break
-                if len(self.module_loops) > 0:      # If the graph is not acyclic
+                if len(self.module_loops) > 0:              # If the graph is not acyclic
                     error = 1
                     for try_docking_loops in range(3):
-                        x0 = self.initialize_x()    # Initialize all variables
+                        x0 = self.initialize_x()            # Initialize all variables
                         x0 = self.optim_angles_la_x(x0)
                         x = self.optim_angles_ld_x(x0)
                         error = self.get_loop_dock_error_x(x)
                         if error > 1e-3:
                             self.bend_angs, self.grsp_angs = self.get_random_angles_da()
                         else:
-                            break                   # Until global minimized
+                            break                           # Until global minimized
                     else:
                         cannot_be_docked = True
                     self.update_angs_from_x(x)
-                # Format: {module_index: ((x, y), alpha, beta), ...}
-                self.module_geometries = {}         # The position, orientation of arcs
-                # Format: [(Bounding Box, Body Polygon), ...]
-                self.module_colliders = []          # The bounding box and body polygon
-                self.update_all_module_geometry()   # Update module_geometries
+                self.update_all_module_geometry_collider()  # Update geometry & collider
                 if not self.is_collision_detected():
-                    break                           # Until no collision
+                    break                                   # Until no collision
             else:
                 if cannot_be_docked:
                     print('\033[91mFailed for Docking Loops :(\033[0m')
@@ -88,11 +90,7 @@ class GMRC(EMRC):
         else:
             self.bend_angs = bending_angles
             self.grsp_angs = grasping_angles
-            # Format: {module_index: ((x, y), alpha, beta)}
-            self.module_geometries = {}         # The position, orientation of arcs
-            # Format: [(Bounding Box, Body Polygon), ...]
-            self.module_colliders = []          # The bounding box and body polygon
-            self.update_all_module_geometry()   # Update module_geometries
+            self.update_all_module_geometry_collider()      # Update geometry & collider
 
     # Generate random angles under dock-angle constraint
     def get_random_angles_da(self):
@@ -328,15 +326,10 @@ class GMRC(EMRC):
                 return -self.grsp_angs[g2]
             
     # Update geometries and colliders of all modules
-    def update_all_module_geometry(self):
+    def update_all_module_geometry_collider(self):
         self.mdl_geo_updated = [False] * self.m
-        self.module_geometries = {}
         self.update_module_geometry(0, (0, 0), 0, 0)
-
-        self.module_colliders = []
-        for i in range(self.m):
-            self.module_colliders.append(
-                self.get_module_collider(self.module_geometries[i]))
+        self._update_all_module_collider()
 
     # Update geometry recursively
     def update_module_geometry(self, mi, sp, sa, ht):
@@ -375,49 +368,11 @@ class GMRC(EMRC):
                         mn_sa = ht_angle[i] + self.get_grasp_angle(gripper, gn)
                         self.update_module_geometry(mn, mn_sp, mn_sa, mn_ht)
 
-    # Get module collider, includinh bounding box and body linestring
-    def get_module_collider(self, geometry): 
-        angs, xy = GMRC.get_mdl_seg_geo(geometry[0], geometry[1], geometry[2])
-
-        inner_pts = np.zeros((GMRC.num_seg_lens, 2))
-        outer_pts = np.zeros((GMRC.num_seg_lens, 2))
-
-        cos_ang_axis = np.cos(angs) * GMRC.plg_axs_place * GMRC.mdl_seg_lens
-        sin_ang_axis = np.sin(angs) * GMRC.plg_axs_place * GMRC.mdl_seg_lens
-        cos_ang_radius = np.cos(angs) * GMRC.radius_ratio
-        sin_ang_radius = np.sin(angs) * GMRC.radius_ratio
-
-        inner_pts[:, 0] = xy[:-1, 0] + cos_ang_axis + sin_ang_radius
-        inner_pts[:, 1] = xy[:-1, 1] + sin_ang_axis - cos_ang_radius
-        outer_pts[:, 0] = xy[:-1, 0] + cos_ang_axis - sin_ang_radius
-        outer_pts[:, 1] = xy[:-1, 1] + sin_ang_axis + cos_ang_radius
-
-        starting_line_seg = np.zeros((2, 2))
-        starting_line_seg[0, 0] = xy[0, 0] + \
-            np.cos(angs[0]) * GMRC.cls_exp_ratio * GMRC.mdl_seg_lens[0]
-        starting_line_seg[0, 1] = xy[0, 1] + \
-            np.sin(angs[0]) * GMRC.cls_exp_ratio * GMRC.mdl_seg_lens[0]
-        starting_line_seg[1, 0] = xy[0, 0] + \
-            np.cos(angs[0]) * GMRC.plg_axs_place[0] * GMRC.mdl_seg_lens[0]
-        starting_line_seg[1, 1] = xy[0, 1] + \
-            np.sin(angs[0]) * GMRC.plg_axs_place[0] * GMRC.mdl_seg_lens[0]
-
-        ending_line_seg = np.zeros((2, 2))
-        ending_line_seg[0, 0] = xy[-2, 0] + \
-            np.cos(angs[-1]) * GMRC.plg_axs_place[-1] * GMRC.mdl_seg_lens[-1]
-        ending_line_seg[0, 1] = xy[-2, 1] + \
-            np.sin(angs[-1]) * GMRC.plg_axs_place[-1] * GMRC.mdl_seg_lens[-1]
-        ending_line_seg[1, 0] = xy[-2, 0] + \
-            np.cos(angs[-1]) * (1 - GMRC.cls_exp_ratio) * GMRC.mdl_seg_lens[-1]
-        ending_line_seg[1, 1] = xy[-2, 1] + \
-            np.sin(angs[-1]) * (1 - GMRC.cls_exp_ratio) * GMRC.mdl_seg_lens[-1]
-
-        linestring_1 = np.vstack((starting_line_seg, outer_pts, ending_line_seg[0, :]))
-        linestring_2 = np.vstack((starting_line_seg[1, :], inner_pts, ending_line_seg))
-
-        mls = MultiLineString([linestring_1, linestring_2])
-        bounds = mls.bounds
-        return (box(bounds[0], bounds[1], bounds[2], bounds[3]), mls)
+    # Update all module colliders
+    def _update_all_module_collider(self):
+        for i in range(self.m):
+            self.module_colliders[i] = GMRC.get_module_collider(
+                self.module_geometries[i])
 
     # Detect collision between all modules
     def is_collision_detected(self):
@@ -464,7 +419,7 @@ class GMRC(EMRC):
             result = GMRC._execute_grasping(self, grip_status, angle)
         else:
             GMRC._execute_releasing(self, grip_status)
-            result = False
+            result = True
         return result
 
     # If gamma is None or out of boundary, then feel free to optimize gamma
@@ -477,7 +432,7 @@ class GMRC(EMRC):
         self.bend_angs[self.yi2mi] = y[0 : self.number_module_in_loop]  # bend_angs
         if is_optim_gamma:
             self._update_grsp_angs_from_gamma(y[-1], grip_status)       # grsp_angs
-        self.update_all_module_geometry()                               # Geometries
+        self.update_all_module_geometry_collider()                      # Geometries
         
         is_success = True
         if error > 1e-1:
@@ -703,6 +658,51 @@ class GMRC(EMRC):
         xy[1:, 0] = xy[1:, 0] + np.cumsum(np.cos(angs) * GMRC.mdl_seg_lens)
         xy[1:, 1] = xy[1:, 1] + np.cumsum(np.sin(angs) * GMRC.mdl_seg_lens)
         return (angs, xy)
+    
+    # Get module collider, includinh bounding box and body linestring
+    @staticmethod
+    def get_module_collider(geometry): 
+        angs, xy = GMRC.get_mdl_seg_geo(geometry[0], geometry[1], geometry[2])
+
+        inner_pts = np.zeros((GMRC.num_seg_lens, 2))
+        outer_pts = np.zeros((GMRC.num_seg_lens, 2))
+
+        cos_ang_axis = np.cos(angs) * GMRC.plg_axs_place * GMRC.mdl_seg_lens
+        sin_ang_axis = np.sin(angs) * GMRC.plg_axs_place * GMRC.mdl_seg_lens
+        cos_ang_radius = np.cos(angs) * GMRC.radius_ratio
+        sin_ang_radius = np.sin(angs) * GMRC.radius_ratio
+
+        inner_pts[:, 0] = xy[:-1, 0] + cos_ang_axis + sin_ang_radius
+        inner_pts[:, 1] = xy[:-1, 1] + sin_ang_axis - cos_ang_radius
+        outer_pts[:, 0] = xy[:-1, 0] + cos_ang_axis - sin_ang_radius
+        outer_pts[:, 1] = xy[:-1, 1] + sin_ang_axis + cos_ang_radius
+
+        starting_line_seg = np.zeros((2, 2))
+        starting_line_seg[0, 0] = xy[0, 0] + \
+            np.cos(angs[0]) * GMRC.cls_exp_ratio * GMRC.mdl_seg_lens[0]
+        starting_line_seg[0, 1] = xy[0, 1] + \
+            np.sin(angs[0]) * GMRC.cls_exp_ratio * GMRC.mdl_seg_lens[0]
+        starting_line_seg[1, 0] = xy[0, 0] + \
+            np.cos(angs[0]) * GMRC.plg_axs_place[0] * GMRC.mdl_seg_lens[0]
+        starting_line_seg[1, 1] = xy[0, 1] + \
+            np.sin(angs[0]) * GMRC.plg_axs_place[0] * GMRC.mdl_seg_lens[0]
+
+        ending_line_seg = np.zeros((2, 2))
+        ending_line_seg[0, 0] = xy[-2, 0] + \
+            np.cos(angs[-1]) * GMRC.plg_axs_place[-1] * GMRC.mdl_seg_lens[-1]
+        ending_line_seg[0, 1] = xy[-2, 1] + \
+            np.sin(angs[-1]) * GMRC.plg_axs_place[-1] * GMRC.mdl_seg_lens[-1]
+        ending_line_seg[1, 0] = xy[-2, 0] + \
+            np.cos(angs[-1]) * (1 - GMRC.cls_exp_ratio) * GMRC.mdl_seg_lens[-1]
+        ending_line_seg[1, 1] = xy[-2, 1] + \
+            np.sin(angs[-1]) * (1 - GMRC.cls_exp_ratio) * GMRC.mdl_seg_lens[-1]
+
+        linestring_1 = np.vstack((starting_line_seg, outer_pts, ending_line_seg[0, :]))
+        linestring_2 = np.vstack((starting_line_seg[1, :], inner_pts, ending_line_seg))
+
+        mls = MultiLineString([linestring_1, linestring_2])
+        bounds = mls.bounds
+        return (box(bounds[0], bounds[1], bounds[2], bounds[3]), mls)
 
     @staticmethod
     # Input parameters: 
