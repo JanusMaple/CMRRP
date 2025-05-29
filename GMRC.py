@@ -1,7 +1,17 @@
+import warnings
+warnings.filterwarnings(
+    "ignore",
+    message="Values in x were outside bounds during a minimize step",
+    category=RuntimeWarning
+)
 import numpy as np
 import networkx as nx
 import matplotlib.pyplot as plt
 from scipy.optimize import minimize
+class EarlyStop(Exception):
+    def __init__(self, x, value):
+        self.x = x
+        self.value = value
 from shapely import STRtree
 from shapely.geometry import MultiLineString, LineString, box
 
@@ -21,7 +31,7 @@ class GMRC(EMRC):
     plg_axs_place =  np.array([0.77, 0.5, 0.5, 0.5, 0.23], dtype=np.float64)
     cls_exp_ratio = 0.01        # Collision exemption ratio
 
-    drs_dis_thd = 0.01          # Dangerous Distance Threshold
+    drs_dis_thd = 0.04          # Dangerous Distance Threshold
 
     # place (i, r): r position of segment i
     text_place = [(0, 0.3), (2, 0.5), (4, 0.7)]
@@ -58,6 +68,8 @@ class GMRC(EMRC):
         # Format: [(Bounding Box, MultiLineString), ...]
         self.module_colliders = [None] * self.m
 
+        self.successfully_spawned = True
+
         if bending_angles is None or grasping_angles is None:
             is_planar, embedding = nx.check_planarity(self.G)   # Must be planar
             cannot_be_docked = False
@@ -65,9 +77,11 @@ class GMRC(EMRC):
                 self.bend_angs, self.grsp_angs = self.get_random_angles_da()
                 if cannot_be_docked:
                     print('\033[91mFailed for Docking Loops :(\033[0m')
+                    self.successfully_spawned = False
                     break
                 elif not is_planar:
                     print('\033[91mThe Graph is Not Planar :(\033[0m')
+                    self.successfully_spawned = False
                     break
                 if len(self.module_loops) > 0:              # If the graph is not acyclic
                     error = 1
@@ -89,6 +103,7 @@ class GMRC(EMRC):
                     break                                   # Until no collision
             else:                                           # Cannot break the loop
                 print('\033[91mFailed for Finding Collision-Free Layout :(\033[0m')
+                self.successfully_spawned = False
         else:
             self.bend_angs = bending_angles
             self.grsp_angs = grasping_angles
@@ -197,13 +212,24 @@ class GMRC(EMRC):
             ]
         else:
             constraints = []
-        result = minimize(
-            self.get_loop_angle_error_x, 
-            x0, 
-            method='SLSQP', 
-            constraints=constraints, 
-            bounds=self.x_boundary)
-        return result.x
+        try:
+            result = minimize(
+                self.get_loop_angle_error_x,
+                x0,
+                args=(True),
+                method='SLSQP',
+                constraints=constraints,
+                bounds=self.x_boundary)
+            return result.x
+        except EarlyStop as e:
+            result = {
+                'x': e.x,
+                'fun': e.value,
+                'message': 'Optmization Stopped Early',
+                'success': True,
+                'status': 0
+            }
+            return result['x']
     
     # Optimize angles in x to minimize loop-dock error
     def optim_angles_ld_x(self, x0):
@@ -215,23 +241,36 @@ class GMRC(EMRC):
                 }, 
                 {
                     'type': 'eq', 
-                    'fun': self.get_loop_angle_error_x
+                    'fun': self.get_loop_angle_error_x,
+                    'args': (False, )
                 }
             ]
         else:
             constraints = [
                 {
                     'type': 'eq', 
-                    'fun': self.get_loop_angle_error_x
+                    'fun': self.get_loop_angle_error_x,
+                    'args': (False, )
                 }
             ]
-        result = minimize(
-            self.get_loop_dock_error_x, 
-            x0, 
-            method='SLSQP', 
-            constraints=constraints, 
-            bounds=self.x_boundary)
-        return result.x
+        try:
+            result = minimize(
+                self.get_loop_dock_error_x,
+                x0,
+                args=(True, ),
+                method='SLSQP',
+                constraints=constraints,
+                bounds=self.x_boundary)
+            return result.x
+        except EarlyStop as e:
+            result = {
+                'x': e.x,
+                'fun': e.value,
+                'message': 'Optmization Stopped Early',
+                'success': True,
+                'status': 0
+            }
+            return result['x']
     
     # Get w-grip angle error (from 360 or 720 depending on the direction)
     def get_w_grip_angle_error_x(self, x):
@@ -242,37 +281,27 @@ class GMRC(EMRC):
         return error
 
     # Get loop-angle error for x
-    def get_loop_angle_error_x(self, x):
+    def get_loop_angle_error_x(self, x, is_obj = False):
         error = 0
         for i in range(len(self.ba_xi_loops)):
             error = error + np.abs(
                 np.sum(x[self.ba_xi_loops[i]] * self.bas_loops[i])
                 + np.sum(x[self.ga_xi_loops[i]] * self.gas_loops[i])
                 - self.loop_polarities[i] * 2 * np.pi)
+        if is_obj and error <= 1e-5:
+            raise EarlyStop(x, error)
         return error
 
     # Get loop-dock error for x
-    def get_loop_dock_error_x(self, x, is_print = False):
+    def get_loop_dock_error_x(self, x, is_obj = False):
         error = 0
         for i in range(len(self.ba_xi_loops)):
             betas = x[self.ba_xi_loops[i]] * self.bas_loops[i]
             gammas = x[self.ga_xi_loops[i]] * self.gas_loops[i]
             l = len(self.ba_xi_loops[i])
             error = error + GMRC.get_single_loop_dock_error(betas, gammas, l)
-            if is_print:
-                print('*********************')
-                print("Loop id: ", end='')
-                print(i)
-                print("Module angles: ", end='')
-                print(betas)
-                print("Grasp angles: ", end='')
-                print(gammas)
-                print('Loop docking error: ', end='')
-                print(GMRC.get_single_loop_dock_error(betas, gammas, l))
-        if is_print:
-            print('*********************')
-            print('Total docking error: ', end='')
-            print(error)
+        if is_obj and error <= 1e-5:
+            raise EarlyStop(x, error)
         return error
     
     # Update angles (self.bend_angs and self.grsp_angs) from x
@@ -421,6 +450,8 @@ class GMRC(EMRC):
                     distance = dd_colliders[i][0].distance(dd_colliders[j][0])
                 if distance < min_dis:
                     min_dis = distance
+                    if min_dis <= 0.0:
+                        break
         return min_dis
 
     # get necessary colliders for calculating dangerous distance
@@ -469,9 +500,12 @@ class GMRC(EMRC):
     # If gamma is None or out of boundary, then feel free to optimize gamma
     def _execute_grasping(self, grip_status, gamma = None):
         y0, is_optim_gamma = self.initialize_y(grip_status, gamma)
-        
+        self.dd_error = []                                      # TODO: To Delete
         y = self.optim_angles_la_y(y0, is_optim_gamma, grip_status)
         y, error = self.optim_angles_ld_y(y, is_optim_gamma, grip_status)
+
+        fig, ax = plt.subplots()                                # TODO: To Delete
+        ax.plot(list(range(len(self.dd_error))), self.dd_error) # TODO: To Delete
 
         self.bend_angs = y[0 : self.m]                                  # bend_angs
         if is_optim_gamma:
@@ -480,7 +514,7 @@ class GMRC(EMRC):
         self.update_all_module_collider()                               # Colliders
         
         is_success = True
-        if error > 1e-1:
+        if error > 1e-1 or self.is_collision_detected():
             print("\033[91mAction Failed\033[0m: Failed to dock the new loop!")
             is_success = False
         return is_success
@@ -540,15 +574,26 @@ class GMRC(EMRC):
                 'args': (is_optim_gamma, grip_status)
             }
         ]
-        result = minimize(
-            self.get_loop_angle_error_y,
-            y0,
-            args=(is_optim_gamma, grip_status),
-            method = 'SLSQP',
-            constraints=constraints,
-            bounds=self.y_boundary
-        )
-        return result.x
+        try:
+            result = minimize(
+                self.get_loop_angle_error_y,
+                y0,
+                args=(True, is_optim_gamma, grip_status),
+                method = 'SLSQP',
+                constraints=constraints,
+                bounds=self.y_boundary,
+                options={'eps': 1e-6, 'disp': False}
+            )
+            return result.x
+        except EarlyStop as e:
+            result = {
+                'x': e.x,
+                'fun': e.value,
+                'message': 'Optmization Stopped Early',
+                'success': True,
+                'status': 0
+            }
+            return result['x']
 
     # Optimize y for docking loops
     def optim_angles_ld_y(self, y0, is_optim_gamma = False, grip_status = None):
@@ -556,7 +601,7 @@ class GMRC(EMRC):
             {
                 'type': 'eq',
                 'fun': self.get_loop_angle_error_y,
-                'args': (is_optim_gamma, grip_status)
+                'args': (False, is_optim_gamma, grip_status)
             }, 
             {
                 'type': 'ineq',
@@ -564,15 +609,26 @@ class GMRC(EMRC):
                 'args': (is_optim_gamma, grip_status)
             }, 
         ]
-        result = minimize(
-            self.get_loop_dock_error_y,
-            y0,
-            args=(is_optim_gamma, grip_status),
-            method = 'SLSQP',
-            constraints=constraints,
-            bounds=self.y_boundary
-        )
-        return (result.x, result.fun)
+        try:
+            result = minimize(
+                self.get_loop_dock_error_y,
+                y0,
+                args=(True, is_optim_gamma, grip_status),
+                method = 'SLSQP',
+                constraints=constraints,
+                bounds=self.y_boundary,
+                options={'disp': False}
+            )
+            return (result.x, result.fun)
+        except EarlyStop as e:
+            result = {
+                'x': e.x,
+                'fun': e.value,
+                'message': 'Optmization Stopped Early',
+                'success': True,
+                'status': 0
+            }
+            return (result['x'], result['fun'])
 
     # Get module collision error objective for given y
     def get_module_collision_error_y(self, y, is_optim_gamma, grip_status):
@@ -581,10 +637,12 @@ class GMRC(EMRC):
         self.bend_angs = y[0 : self.m]
         self.update_all_module_geometry()
         dd =  self.get_dangerous_distance()
-        return min(dd, GMRC.drs_dis_thd)
+        dd_error = dd - GMRC.drs_dis_thd
+        self.dd_error.append(dd_error)          # TODO: To Delete
+        return dd_error
 
     # Get loop angle error for given y
-    def get_loop_angle_error_y(self, y, is_optim_gamma, grip_status):
+    def get_loop_angle_error_y(self, y, is_obj, is_optim_gamma, grip_status):
         if is_optim_gamma:
             self._update_grsp_angs_from_gamma(y[-1], grip_status)
         error = 0
@@ -593,10 +651,12 @@ class GMRC(EMRC):
             gammas = self.grsp_angs[self.ga_gi_loops[i]] * self.gas_loops[i]
             ang_sum_tar = self.loop_polarities[i] * 2 * np.pi
             error = error + np.abs(np.sum(betas) + np.sum(gammas) - ang_sum_tar)
+        if is_obj and error <= 1e-5:
+            raise EarlyStop(y, error)
         return error
 
     # Get loop docking error for given y
-    def get_loop_dock_error_y(self, y, is_optim_gamma, grip_status):
+    def get_loop_dock_error_y(self, y, is_obj, is_optim_gamma, grip_status):
         if is_optim_gamma:
             self._update_grsp_angs_from_gamma(y[-1], grip_status)
         error = 0
@@ -605,6 +665,8 @@ class GMRC(EMRC):
             gammas = self.grsp_angs[self.ga_gi_loops[i]] * self.gas_loops[i]
             l = len(self.ba_yi_loops[i])
             error = error + GMRC.get_single_loop_dock_error(betas, gammas, l)
+        if is_obj and error <= 1e-5:
+            raise EarlyStop(y, error)
         return error
 
     # Update self.grsp_angles from an angle gamma and grip_status
