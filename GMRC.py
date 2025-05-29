@@ -21,7 +21,7 @@ class GMRC(EMRC):
     plg_axs_place =  np.array([0.77, 0.5, 0.5, 0.5, 0.23], dtype=np.float64)
     cls_exp_ratio = 0.01        # Collision exemption ratio
 
-    drs_dis_thd = 0.05          # Dangerous Distance Threshold
+    drs_dis_thd = 0.01          # Dangerous Distance Threshold
 
     # place (i, r): r position of segment i
     text_place = [(0, 0.3), (2, 0.5), (4, 0.7)]
@@ -361,7 +361,6 @@ class GMRC(EMRC):
             ht_position[0], 
             ht_angle[0] - np.pi,                    # Growing angle is opposite to it 
             self.bend_angs[mi],
-            ht                                      # Either from head or tail
             )
         self.mdl_geo_updated[mi] = True
 
@@ -398,19 +397,31 @@ class GMRC(EMRC):
         min_dis = 1e6
         for i in range(self.m):
             for j in range(i + 1, self.m):
-                if self.module2gripper[0][i] // 3 == self.module2gripper[0][j] // 3:
+                gih = self.module2gripper[0][i]             # Gripper of module i head
+                git = self.module2gripper[1][i]             # Gripper of module i tail
+                gjh = self.module2gripper[0][j]             # Gripper of module j head
+                gjt = self.module2gripper[1][j]             # Gripper of module j tail
+                if gih >= 0 and gjh >= 0 and gih // 3 == gjh // 3:
+                    if git // 3 == gjt // 3:
+                        continue
                     distance = dd_colliders[i][2].distance(dd_colliders[j][2])
-                elif self.module2gripper[1][i] // 3 == self.module2gripper[0][j] // 3:
+                elif git >= 0 and gjh >= 0 and git // 3 == gjh // 3:
+                    if gih // 3 == gjt // 3:
+                        continue
                     distance = dd_colliders[i][1].distance(dd_colliders[j][2])
-                elif self.module2gripper[0][i] // 3 == self.module2gripper[1][j] // 3:
+                elif gih >= 0 and gjt >= 0 and gih // 3 == gjt // 3:
+                    if git // 3 == gjh // 3:
+                        continue
                     distance = dd_colliders[i][2].distance(dd_colliders[j][1])
-                elif self.module2gripper[1][i] // 3 == self.module2gripper[1][j] // 3:
+                elif git >= 0 and gjt >= 0 and git // 3 == gjt // 3:
+                    if gih // 3 == gjh // 3:
+                        continue
                     distance = dd_colliders[i][1].distance(dd_colliders[j][1])
                 else:
                     distance = dd_colliders[i][0].distance(dd_colliders[j][0])
                 if distance < min_dis:
                     min_dis = distance
-        return min_dis - GMRC.drs_dis_thd
+        return min_dis
 
     # get necessary colliders for calculating dangerous distance
     def _get_dd_colliders(self):
@@ -569,7 +580,8 @@ class GMRC(EMRC):
             self._update_grsp_angs_from_gamma(y[-1], grip_status)
         self.bend_angs = y[0 : self.m]
         self.update_all_module_geometry()
-        return self.get_dangerous_distance()
+        dd =  self.get_dangerous_distance()
+        return dd - GMRC.drs_dis_thd
 
     # Get loop angle error for given y
     def get_loop_angle_error_y(self, y, is_optim_gamma, grip_status):
@@ -793,10 +805,8 @@ class GMRC(EMRC):
                                                     inner_pts[::-1, :], 
                                                     outer_pts, 
                                                     ending_line_seg[0, :])))
-        if geometry[3] == 0:                                        # Starting from head
-            return (mls, start_linestring_1, end_linestring_2)
-        else:                                                       # Starting from tail
-            return (mls, end_linestring_2, start_linestring_1)
+        
+        return (mls, start_linestring_1, end_linestring_2)
 
     @staticmethod
     # Input parameters: 
