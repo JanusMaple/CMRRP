@@ -581,7 +581,7 @@ class GMRC(EMRC):
         self.bend_angs = y[0 : self.m]
         self.update_all_module_geometry()
         dd =  self.get_dangerous_distance()
-        return dd - GMRC.drs_dis_thd
+        return min(dd, GMRC.drs_dis_thd)
 
     # Get loop angle error for given y
     def get_loop_angle_error_y(self, y, is_optim_gamma, grip_status):
