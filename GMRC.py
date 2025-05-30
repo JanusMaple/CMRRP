@@ -7,6 +7,8 @@ warnings.filterwarnings(
 import numpy as np
 import networkx as nx
 import matplotlib.pyplot as plt
+from PIL import Image
+import io
 from scipy.optimize import minimize
 class EarlyStop(Exception):
     def __init__(self, x, value):
@@ -33,6 +35,9 @@ class GMRC(EMRC):
 
     drs_dis_thd = 0.01          # Dangerous Distance Threshold
     loop_ang_thd = np.pi / 6    # Loop angle optimization phase I threshold
+
+    store_gif = False            # Whether to store a gif of action
+    store_gif_filename = 'grasping_action.gif'
 
     # place (i, r): r position of segment i
     text_place = [(0, 0.3), (2, 0.5), (4, 0.7)]
@@ -506,8 +511,23 @@ class GMRC(EMRC):
     # If gamma is None or out of boundary, then feel free to optimize gamma
     def _execute_grasping(self, grip_status, gamma = None):
         y0, is_optim_gamma = self.initialize_y(grip_status, gamma)
+
+        if GMRC.store_gif:
+            fig, self.gif_ax = plt.subplots()
+            self.gif_frames = []
+
         y = self.optim_angles_y_ang(y0, is_optim_gamma, grip_status)
         y, error = self.optim_angles_y_all(y, is_optim_gamma, grip_status)
+
+        if GMRC.store_gif:
+            self.gif_frames[0].save(
+                self.store_gif_filename,
+                format='GIF',
+                save_all=True,
+                append_images=self.gif_frames[1:],
+                duration=200,               # Duration between frames in milliseconds
+                loop=0                      # Loop indefinitely
+            )
 
         self.bend_angs = y[0 : self.m]                                  # bend_angs
         if is_optim_gamma:
@@ -600,6 +620,7 @@ class GMRC(EMRC):
                 method = 'SLSQP',
                 constraints=constraints,
                 bounds=self.y_boundary,
+                callback=self.optim_y_callback,
                 options={'eps': 1e-6, 'disp': False}
             )
             return result.x
@@ -643,6 +664,7 @@ class GMRC(EMRC):
                 method = 'SLSQP',
                 constraints=constraints,
                 bounds=self.y_boundary,
+                callback=self.optim_y_callback,
                 options={'eps': 1e-6, 'disp': False}
             )
             return (result.x, result.fun)
@@ -655,6 +677,37 @@ class GMRC(EMRC):
                 'status': 0
             }
             return (result['x'], result['fun'])
+
+    # Optimization callback function for storing gif of the action
+    def optim_y_callback(self, y_k):
+         if GMRC.store_gif:
+            # NOTE: # Geomery has already been updated by get_module_collision_error_y
+            self.update_all_module_collider()
+            self.gif_ax.clear()
+            self.gif_ax.set_aspect('equal')
+            self.gif_ax.axis('off')
+            # self.gif_ax.set_xlim(-self.m * 1.0, self.m * 1.0)
+            # self.gif_ax.set_ylim(-self.m * 1.0, self.m * 1.0)
+            for i in range(self.m):
+                g1n = f"H{self.module2gripper[0][i]}"
+                mn = f"{i}"
+                g2n = f"T{self.module2gripper[1][i]}"
+                GMRC.draw_module(
+                    self.gif_ax, 
+                    self.module_geometries[i][0], 
+                    self.module_geometries[i][1], 
+                    self.module_geometries[i][2], 
+                    g1n, 
+                    mn, 
+                    g2n
+                )
+                for line in self.module_colliders[i][1].geoms:
+                    x, y = line.xy
+                    self.gif_ax.plot(x, y, color = 'b')
+            buf = io.BytesIO()
+            plt.savefig(buf, format='png')
+            buf.seek(0)
+            self.gif_frames.append(Image.open(buf))
 
     # Get module collision error objective for given y
     def get_module_collision_error_y(self, y, is_optim_gamma, grip_status):
