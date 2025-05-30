@@ -437,19 +437,19 @@ class GMRC(EMRC):
                 gjh = self.module2gripper[0][j]             # Gripper of module j head
                 gjt = self.module2gripper[1][j]             # Gripper of module j tail
                 if gih >= 0 and gjh >= 0 and gih // 3 == gjh // 3:
-                    if git // 3 == gjt // 3:
+                    if git >= 0 and gjt >= 0 and git // 3 == gjt // 3:
                         continue
                     distance = dd_colliders[i][2].distance(dd_colliders[j][2])
                 elif git >= 0 and gjh >= 0 and git // 3 == gjh // 3:
-                    if gih // 3 == gjt // 3:
+                    if gih >= 0 and gjt >= 0 and gih // 3 == gjt // 3:
                         continue
                     distance = dd_colliders[i][1].distance(dd_colliders[j][2])
                 elif gih >= 0 and gjt >= 0 and gih // 3 == gjt // 3:
-                    if git // 3 == gjh // 3:
+                    if git >= 0 and gjh >= 0 and git // 3 == gjh // 3:
                         continue
                     distance = dd_colliders[i][2].distance(dd_colliders[j][1])
                 elif git >= 0 and gjt >= 0 and git // 3 == gjt // 3:
-                    if gih // 3 == gjh // 3:
+                    if gih >= 0 and gjh >= 0 and gih // 3 == gjh // 3:
                         continue
                     distance = dd_colliders[i][1].distance(dd_colliders[j][1])
                 else:
