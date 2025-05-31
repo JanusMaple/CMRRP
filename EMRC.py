@@ -41,6 +41,8 @@ class EMRC(TMRC):
             self.loop_polarities = loop_polarities
             self.grip_polarities = grip_polarities
 
+        self.retro_action = None                            # The action the goes back
+
     # [m0, m1, ..., mc], if mi > 0 than it is from head to tail; otherwise tail to head
     def get_module_loop(self, real_cycle):
         module_loop = [0] * (len(real_cycle) // 3)
@@ -354,6 +356,9 @@ class EMRC(TMRC):
             else:
                 gripper = 3 * grip + 1
             if gcr[gripper]:
+                if self.retro_action is not None:
+                    if self.retro_action == self.gripper2module[gripper]:
+                        continue
                 actions.append(self.gripper2module[gripper])
         return actions
     
@@ -383,6 +388,11 @@ class EMRC(TMRC):
         else:                                           # Forming a v-grip
             self.grip_polarities.append(0)
 
+        if gs[1] == 0:                                  # v-grip to w-grip
+            self.retro_action = self.gripper2module[3 * gs[0] + 2]
+        else:                                           # Created v-grip
+            self.retro_action = self.gripper2module[3 * gs[0] + 1]
+
     def _execute_releasing(self, cs, gs):
         adb = 0                                         # After deletion bias, 0 or -1
         del_cyc_idx = -1
@@ -406,6 +416,8 @@ class EMRC(TMRC):
             self.grip_polarities[gs[0]] = 0
         else:                                           # Releasing a v-grip
             self.grip_polarities[gs[0] : gs[0] + 1] = []
+
+        self.retro_action = None                        # No retro action after releasing
     
     def print_all_directions(self):
         print(f"Module Loops are: {self.module_loops}")
