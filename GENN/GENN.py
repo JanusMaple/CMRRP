@@ -2,7 +2,6 @@ import torch
 from torch import nn
 from torch.nn.utils.rnn import pad_sequence, pack_padded_sequence
 from torch_geometric.nn import MessagePassing
-from torch_geometric.utils import add_self_loops, degree
 
 class GENN(MessagePassing):
     max_num_degree = 3
@@ -25,7 +24,7 @@ class GENN(MessagePassing):
         the device where this model is implemented
     """
     def __init__(self, in_dim, out_dim, hidden_dim, device=None):
-        super().__init__(aggr='None')                   # By None it uses aggregate()
+        super().__init__(aggr='add')                    # Sum
         self.seq_model = nn.RNN(
             in_dim,
             hidden_dim,
@@ -39,6 +38,10 @@ class GENN(MessagePassing):
             out_dim,
             device=device
             )
+        self.batch_norm = nn.BatchNorm1d(
+            out_dim, 
+            device=device
+        )
 
     def reset_parameters(self):
         return super().reset_parameters()
@@ -57,15 +60,26 @@ class GENN(MessagePassing):
                                             batch_first=False, enforce_sorted=False)
 
         _, h_n = self.seq_model(packed_feats)
-        seq_out = h_n[-1]
+        seq_out = h_n[-1]                               # size: (node_num, hidden_dim)
 
-        return self.propagate(edge_index, x=x, seq=seq_out)
+        return self.propagate(edge_index, x=x, seq=seq_out, neighbor_num=neighbor_num)
 
-    def message(self, seq_j):
-        return seq_j
-    
-    def aggregate(self, inputs, index, ptr = None, dim_size = None):
-        return super().aggregate(inputs, index, ptr, dim_size)
+    """
+    Message passing from node j to node i
+    """
+    def message(self, seq_i, neighbor_num_i):           # foo_i = foo[i]
+        return seq_i / neighbor_num_i                   # Normalization
 
+    """
+    Update aggregation output with original node feature
+
+    Parameters
+    ----------
+    aggr_out: torch.tensor; size: (node_num, hidden_dim)
+
+    x: torch.tensor; size: (node_num, input_dim)
+    """
     def update(self, aggr_out, x):
-        return self.update_mlp(torch.cat([x, aggr_out], dim=-1))
+        out = self.update_mlp(torch.cat([x, aggr_out], dim=-1))
+        out_norm = self.batch_norm(out)
+        return out_norm
