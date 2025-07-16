@@ -1,3 +1,4 @@
+import torch
 from TMRC import TMRC
 
 # Embedded Modular Robot Configuration
@@ -418,6 +419,81 @@ class EMRC(TMRC):
             self.grip_polarities[gs[0] : gs[0] + 1] = []
 
         self.retro_action = None                        # No retro action after releasing
+
+    def get_representation(self, random_permutation = False):
+        # NOTE: Use outer gripper to represent a grip as a graph node
+        node_num = 2 * self.m - 2 * self.w - self.v     # Number of nodes
+        edge_num = self.m                               # Number of edges
+        susp_num = node_num -self.w - self.v
+        # Assign each node a gripper (either outer gripper for grip or suspended sibling)
+        node2gripper = [0] * node_num                   # Node to gripper/susp
+        susp2gripper = [0] * susp_num                   # Susp to gripper
+        node_index = 0
+        susp_offset = 0
+        for i in range(len(self.grippers)):
+            if i % 3 == 0:                              # A grip node
+                node2gripper[node_index] = i            # An outer gripper of a grip
+                node_index = node_index + 1
+            if self.grippers[i] == -1:                  # A suspended node
+                node2gripper[node_index] = -susp_offset - 1
+                susp2gripper[susp_offset] = i           # Suspended gripper's sibling
+                susp_offset = susp_offset + 1
+                node_index = node_index + 1
+        # Randomly permuatate all node indexes if needed
+        if random_permutation:
+            for i in range(node_num - 1):
+                j = self.rng.integers(i, node_num)
+                swap = node2gripper[i]
+                node2gripper[i] = node2gripper[j]
+                node2gripper[j] = swap
+        # Backtrack each gripper's belonging node for both in-grip and suspened ones
+        gripper2node = [-1] * len(self.grippers)        # Gripper to node
+        susp2node = [-1] * len(self.grippers)           # Suspended's sibling to node
+        for i in range(node_num):
+            if node2gripper[i] >= 0:
+                gripper2node[node2gripper[i]] = i
+                gripper2node[node2gripper[i] + 1] = i
+                gripper2node[node2gripper[i] + 2] = i
+            else:
+                sibling_gripper = susp2gripper[-node2gripper[i] - 1]
+                susp2node[sibling_gripper] = i
+        # Get x, edge_index and cyclic_neighbors for given node-gripper correspondance
+        x = torch.zeros(node_num, dtype=torch.float)
+        edge_index = torch.zeros(2, edge_num * 2,       # Undirected edges
+                                 dtype=torch.long)
+        cyclic_neighbors = []
+        cur_edge = 0
+        for i in range(node_num):
+            neighbors = []
+            if node2gripper[i] >= 0:
+                if self.is_grip_w[node2gripper[i] // 3]:
+                    x[i] = 3.0
+                    for g in range(3):
+                        gripper = node2gripper[i] + g
+                        if self.grippers[gripper] >= 0:
+                            neighbors.append(gripper2node[self.grippers[gripper]])
+                        else:
+                            neighbors.append(susp2node[gripper])
+                    if self.grip_polarities[node2gripper[i] // 3] < 0:
+                        neighbors.reverse()
+                else:
+                    x[i] = 2.0
+                    for g in range(2):
+                        gripper = node2gripper[i] + g
+                        if self.grippers[gripper] >= 0:
+                            neighbors.append(gripper2node[self.grippers[gripper]])
+                        else:
+                            neighbors.append(susp2node[gripper])
+            else:
+                x[i] = 1.0
+                neighbors = [gripper2node[susp2gripper[-node2gripper[i] - 1]]]
+            for neighbor in neighbors:
+                edge_index[0, cur_edge] = i
+                edge_index[1, cur_edge] = neighbor
+                cur_edge = cur_edge + 1
+            cyclic_neighbor = torch.tensor(neighbors, dtype=torch.long)
+            cyclic_neighbors.append(cyclic_neighbor)
+        return x, edge_index, cyclic_neighbors
     
     def print_all_directions(self):
         print(f"Module Loops are: {self.module_loops}")

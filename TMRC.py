@@ -28,7 +28,7 @@ class TMRC:
 
         grippers : [int, int, ..., int]; size: 3 * (w + v)
             Actually, a more appropriate name should be gripper2gripper \n
-            A list with length  for all grippers participating in grip \n
+            A list with length 3 * (w + v) for all grippers participating in grip \n
             grippers[i] = -2: No gripper here at i \n
             gripper[i] = -1: Gripper i is connected to a suspending gripper \n
             gripper[i] >= 0: Gripper i is connected to gripper gripper[i] \n
