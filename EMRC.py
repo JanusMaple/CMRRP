@@ -461,7 +461,8 @@ class EMRC(TMRC):
         x = torch.zeros(node_num, dtype=torch.float)
         edge_index = torch.zeros(2, edge_num * 2,       # Undirected edges
                                  dtype=torch.long)
-        cyclic_neighbors = []
+        cyclic_neighbors = torch.zeros(node_num, 3, dtype=torch.float)
+        neighbor_num = torch.zeros(node_num, dtype=torch.long)
         cur_edge = 0
         for i in range(node_num):
             neighbors = []
@@ -492,8 +493,9 @@ class EMRC(TMRC):
                 edge_index[1, cur_edge] = neighbor
                 cur_edge = cur_edge + 1
             cyclic_neighbor = torch.tensor(neighbors, dtype=torch.long)
-            cyclic_neighbors.append(cyclic_neighbor)
-        return x, edge_index, cyclic_neighbors
+            neighbor_num[i] = x[i].long()
+            cyclic_neighbors[i, 0 : neighbor_num[i]] = cyclic_neighbor
+        return x, edge_index, cyclic_neighbors, neighbor_num
     
     def print_all_directions(self):
         print(f"Module Loops are: {self.module_loops}")

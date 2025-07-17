@@ -48,13 +48,17 @@ class GENN(MessagePassing):
 
     def forward(self, x: torch.Tensor, 
                 edge_index: torch.Tensor, 
-                cyclic_neighbors: list):
+                cyclic_neighbors: torch.Tensor, 
+                neighbor_num: torch.Tensor):
         # x: [num_nodes, in_dim], dtype: float
         # edge_index: [2, num_edges], dtype: long
-        # cyclic_neighbors: [torch.tensor(dtype = torch.long)] * num_nodes
+        # cyclic_neighbors: [num_nodes, max_num_degree = 3], dtype: long
+        # neighbor_num: [num_nodes, ], dtype: long
 
-        neighbor_feats = [x[neighbors] for neighbors in cyclic_neighbors]
-        neighbor_num = torch.tensor([len(neighbors) for neighbors in cyclic_neighbors])
+        neighbor_feats = []
+        for i in range(neighbor_num.size()[0]):
+            neighbor_feat = x[cyclic_neighbors[i, 0 : neighbor_num[i]]]
+            neighbor_feats.append(neighbor_feat)
         padded_feats = pad_sequence(neighbor_feats, batch_first=False)
         packed_feats = pack_padded_sequence(padded_feats, neighbor_num, 
                                             batch_first=False, enforce_sorted=False)
