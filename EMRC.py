@@ -362,7 +362,7 @@ class EMRC(TMRC):
                         continue
                 actions.append(self.gripper2module[gripper])
         return actions
-    
+
     def execute_action(self, action):
         cyc_status, grip_status = super().execute_action(action)
         if isinstance(action, tuple):                   # action: tuple; cyc_status: int
@@ -370,6 +370,11 @@ class EMRC(TMRC):
         else:                                           # action: int; cyc_status: list
             EMRC._execute_releasing(self, cyc_status, grip_status)
         return grip_status
+    
+    def execute_random_action(self):
+        actions = self.get_all_actions()
+        action = actions[self.rng.choice(len(actions))]
+        self.execute_action(action)
 
     def _execute_grasping(self, pp, cs, gs):
         self.module_loops.append(self.get_module_loop(self.real_cycles[cs]))

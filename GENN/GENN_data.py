@@ -1,7 +1,7 @@
 import os
 import sys
 import torch
-from torch_geometric.data import Data, InMemoryDataset, Batch
+from torch_geometric.data import Data, InMemoryDataset
 
 sys.path.append('..')
 from EMRC import EMRC
@@ -51,7 +51,3 @@ class GENNDataset(InMemoryDataset):
             data_list.append(data)
         data, slices = self.collate(data_list)
         torch.save((data, slices), self.processed_paths[0])
-
-class GENNDataBatch(Batch):
-    def __init__(self, batch):
-        pass
