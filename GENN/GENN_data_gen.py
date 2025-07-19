@@ -13,13 +13,13 @@ from GENN_data import GENNDataset
 
 module_number = 7
 rw_steps = [0, 1, 4, 9, 16, 25, 36]
-data_size_per_step = 1024
+data_size_per_step = 10
 
 emrc_pairs = []
 
 for i in tqdm(range(data_size_per_step * len(rw_steps))):
     rw_step = rw_steps[i % len(rw_steps)]
-    emrc_1 = EMRC.get_random_configuration(module_number)
+    emrc_1 = EMRC.get_random_configuration(module_number, seed=i)
     emrc_2 = EMRC(w=emrc_1.w,
                   v=emrc_1.v,
                   n=emrc_1.n,
@@ -31,8 +31,14 @@ for i in tqdm(range(data_size_per_step * len(rw_steps))):
                   loop_polarities=emrc_1.loop_polarities,
                   grip_polarities=emrc_1.grip_polarities)
     for j in range(rw_step):
+        if i == 19 and j == 4:
+            emrc_2.print_configuration_data()
+            emrc_2.show_topology()
+            print(f"i = {i}; j = {j}; Right?")
+            while True:
+                pass
         emrc_2.execute_random_action()
     distance = torch.tensor([np.sqrt(rw_step)], dtype=torch.float)
     emrc_pairs.append((emrc_1, emrc_2, distance))
 
-dataset = GENNDataset(emrc_pairs)
+# dataset = GENNDataset(emrc_pairs=emrc_pairs)

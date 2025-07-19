@@ -39,10 +39,10 @@ class EMRC(TMRC):
         if (loop_polarities is None or grip_polarities is None):
             self.loop_polarities, self.grip_polarities = self.get_polarities()
         else:
-            self.loop_polarities = loop_polarities
-            self.grip_polarities = grip_polarities
+            self.loop_polarities = [lp for lp in loop_polarities]
+            self.grip_polarities = [gp for gp in grip_polarities]
 
-        self.retro_action = None                            # The action the goes back
+        self.retro_action = None                            # The action that goes back
 
     # [m0, m1, ..., mc], if mi > 0 than it is from head to tail; otherwise tail to head
     def get_module_loop(self, real_cycle):
@@ -363,6 +363,13 @@ class EMRC(TMRC):
                 actions.append(self.gripper2module[gripper])
         return actions
 
+    def execute_random_action(self, is_print = False):
+        actions = self.get_all_actions()
+        action = actions[self.rng.choice(len(actions))]
+        if is_print:
+            print(f"\033[91mTaking action: {action}\033[0m")
+        self.execute_action(action)
+
     def execute_action(self, action):
         cyc_status, grip_status = super().execute_action(action)
         if isinstance(action, tuple):                   # action: tuple; cyc_status: int
@@ -370,11 +377,6 @@ class EMRC(TMRC):
         else:                                           # action: int; cyc_status: list
             EMRC._execute_releasing(self, cyc_status, grip_status)
         return grip_status
-    
-    def execute_random_action(self):
-        actions = self.get_all_actions()
-        action = actions[self.rng.choice(len(actions))]
-        self.execute_action(action)
 
     def _execute_grasping(self, pp, cs, gs):
         self.module_loops.append(self.get_module_loop(self.real_cycles[cs]))

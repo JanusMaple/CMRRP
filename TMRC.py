@@ -1,3 +1,4 @@
+import copy
 import numpy as np
 import networkx as nx
 import matplotlib.pyplot as plt
@@ -89,27 +90,27 @@ class TMRC:
         if G is None:
             self.G = self.get_graph()
         else:
-            self.G = G
+            self.G = copy.deepcopy(G)
 
         if mdl_cycles is None:
             self.mdl_cycles = self.get_mdl_cycles()
         else:
-            self.mdl_cycles = mdl_cycles
+            self.mdl_cycles = [mc for mc in mdl_cycles]
 
         if grip_cycles is None:
             self.grip_cycles = [self.get_grip_cycle(c) for c in self.mdl_cycles]
         else:
-            self.grip_cycles = grip_cycles
+            self.grip_cycles = [gc for gc in grip_cycles]
 
         if real_cycles is None:
             self.real_cycles = [self.get_real_cycle(c) for c in self.mdl_cycles]
         else:
-            self.real_cycles = real_cycles
+            self.real_cycles = [rc for rc in real_cycles]
 
         if is_grip_w is None:
             self.is_grip_w = self.get_is_grip_w()
         else:
-            self.is_grip_w = is_grip_w
+            self.is_grip_w = [igw for igw in is_grip_w]
 
     def get_is_grip_w(self):
         # Is the grip (node index) a w-grip?
@@ -119,7 +120,7 @@ class TMRC:
                 is_grip_w[i] = False
         return is_grip_w
 
-    def get_graph(self):
+    def get_graph(self) -> nx.MultiDiGraph:
         # Construct topology graph of MRC
         module_available = [True] * self.m
         G = nx.MultiGraph()
@@ -332,7 +333,12 @@ class TMRC:
 
             self.c = self.c + 1
             self.G.remove_node(-gf - 1)
-            key = self.G.number_of_edges(emt_gripper // 3, tar_gripper // 3)
+            d = self.G.number_of_edges(emt_gripper // 3, tar_gripper // 3)
+            if d > 0:                                               # Must be: d = 1
+                edge_data = self.G.get_edge_data(emt_gripper // 3, tar_gripper // 3)
+                key = 1 - next(iter(edge_data.keys()))
+            else:
+                key = 0
             self.G.add_edge(emt_gripper // 3, tar_gripper // 3, key=key, module=gf // 2)
             mdl_cycle = gp + [gf // 2, gp[0]]
             real_cycle = self.get_real_cycle(mdl_cycle)
@@ -494,6 +500,8 @@ class TMRC:
                             mdl_cycle[mdl_idx - 1 : mdl_idx + 2] = path_1
                         else:
                             mdl_cycle[mdl_idx - 1 : mdl_idx + 2] = path_2
+                        mdl_cycle = self._clean_mdl_cycle(mdl_cycle)
+                        self.mdl_cycles[cyc_idx] = mdl_cycle
                         self.real_cycles[cyc_idx] = self.get_real_cycle(mdl_cycle)
                         self.grip_cycles[cyc_idx] = self.get_grip_cycle(mdl_cycle)
             self.mdl_cycles[min_cyc_idx : min_cyc_idx + 1] = []
@@ -536,7 +544,9 @@ class TMRC:
                             grip_cycle[-1] = grip_cycle[0]
                         elif grip_idx == ori_len - 2:
                             grip_cycle[0] = grip_cycle[-1]
-                        self.mdl_cycles[cyc_idx] = self.grip_cyc_to_mdl_cyc(grip_cycle)
+                        mdl_cycle = self.grip_cyc_to_mdl_cyc(grip_cycle)
+                        mdl_cycle = self._clean_mdl_cycle(mdl_cycle)
+                        self.mdl_cycles[cyc_idx] = mdl_cycle
             self.mdl_cycles[min_cyc_idx : min_cyc_idx + 1] = []
             for i in range(len(self.mdl_cycles)):
                 mdl_cycle = self.mdl_cycles[i]
@@ -551,6 +561,34 @@ class TMRC:
             cyc_status[cyc_idx] = 1
         cyc_status[min_cyc_idx] = -1
         return cyc_status
+    
+    # Clean new module cycle after edge deletion in case there is backtracking
+    def _clean_mdl_cycle(self, mdl_cycle, ban:list = []):
+        # print(f"mdl_cycle: {mdl_cycle}!!!!")
+        # print(f"ban: {ban}")
+        grip_idx = [-1] * (self.w + self.v + 1) # In case is deleting a v-grip
+        grip_count = [0] * (self.w + self.v + 1)
+        for i in range(len(mdl_cycle) // 2):
+            grip = mdl_cycle[2 * i]
+            grip_count[grip] = grip_count[grip] + 1
+            if grip_count[grip] > 1 and not grip in ban:
+                dup_idx_1 = grip_idx[grip]
+                dup_idx_2 = 2 * i               # NOTE: dup_idx_2 >= dup_idx_1
+                break
+            grip_idx[grip] = 2 * i
+        else:
+            return mdl_cycle                    # No backtracking on branch detected
+        # Perform symmetricity annihilation to prevent backtracking
+        # print(f"mdl_cycle: {mdl_cycle}????")
+        clean_cycle = mdl_cycle[0 : -1]
+        if not clean_cycle[dup_idx_1 - 1] == clean_cycle[dup_idx_2 + 1]:
+            new_cycle = mdl_cycle[dup_idx_2 : -1] + mdl_cycle[0 : dup_idx_1 + 1]
+        elif not clean_cycle[dup_idx_1 + 1] == clean_cycle[dup_idx_2 - 1]:
+            new_cycle = mdl_cycle[dup_idx_1 : dup_idx_2 + 1]
+        else:
+            ban.append(grip)
+            return self._clean_mdl_cycle(mdl_cycle, ban)
+        return self._clean_mdl_cycle(new_cycle) # Could be multiple backtracking
     
     # Print w-grip modules
     def print_w_grip_modules(self):
