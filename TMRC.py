@@ -77,9 +77,9 @@ class TMRC:
         self.v = v
         self.n = n
         self.m = m
-        self.grippers = grippers
-        self.gripper2module = gripper2module
-        self.module2gripper = module2gripper
+        self.grippers = [gripper for gripper in grippers]
+        self.gripper2module = [g2m for g2m in gripper2module]
+        self.module2gripper = [m2g for m2g in module2gripper]
         self.rng = rng
 
         if c is None:
