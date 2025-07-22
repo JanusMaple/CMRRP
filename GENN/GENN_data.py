@@ -13,14 +13,16 @@ class GENNData(Data):
         return super().__inc__(key, value, *args, **kwargs)
 
 class GENNDataset(InMemoryDataset):
-    def __init__(self, emrc_pairs: list[tuple[EMRC, EMRC, torch.tensor]], root = None):
+    def __init__(self, emrc_pairs: list[tuple[EMRC, EMRC, torch.tensor]], 
+                 root = None, force_reload = False):
         self.emrc_pairs = emrc_pairs
         if root is None:
             root = os.path.join(
                 os.path.dirname(os.path.abspath(__file__)),
                 'data'
             )
-        super().__init__(root, transform=None, pre_transform=None, pre_filter=None)
+        super().__init__(root, force_reload=force_reload, 
+                         transform=None, pre_transform=None, pre_filter=None)
         self.load(self.processed_paths[0])
 
     @property

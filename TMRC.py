@@ -563,7 +563,9 @@ class TMRC:
         return cyc_status
     
     # Clean new module cycle after edge deletion in case there is backtracking
-    def _clean_mdl_cycle(self, mdl_cycle, ban:list = []):
+    def _clean_mdl_cycle(self, mdl_cycle, ban:list = None):
+        if ban is None:
+            ban = []
         grip_idx = [-1] * (self.w + self.v + 1) # In case is deleting a v-grip
         grip_count = [0] * (self.w + self.v + 1)
         for i in range(len(mdl_cycle) // 2):

@@ -368,10 +368,13 @@ class EMRC(TMRC):
         action = actions[self.rng.choice(len(actions))]
         if is_print:
             print(f"\033[91mTaking action: {action}\033[0m")
-        self.execute_action(action)
+        self.execute_action(action, is_print)
 
-    def execute_action(self, action):
+    def execute_action(self, action, is_print = False):
         cyc_status, grip_status = super().execute_action(action)
+        if is_print:
+            print(f"\033[91mcyc_status is: {cyc_status}\033[0m")
+            print(f"\033[91mgrip_status: {grip_status}\033[0m")
         if isinstance(action, tuple):                   # action: tuple; cyc_status: int
             EMRC._execute_grasping(self, action[3], cyc_status, grip_status)
         else:                                           # action: int; cyc_status: list
