@@ -1,16 +1,17 @@
 import os
 import sys
 import torch
-from torch_geometric.data import Data, InMemoryDataset
+from torch_geometric.data import HeteroData, InMemoryDataset
 
 sys.path.append('..')
 from EMRC import EMRC
 
-class GENNData(Data):
-    def __inc__(self, key, value, *args, **kwargs):
-        if key == 'cyclic_neighbors':
-            return self.num_nodes
-        return super().__inc__(key, value, *args, **kwargs)
+class GENNData(HeteroData):
+    def __inc__(self, key: str, value: any, store=None):
+        if key.endswith('cyclic_neighbors'):
+            if store is not None and hasattr(store, 'num_nodes'):
+                return store.num_nodes
+        return super().__inc__(key, value, store=store)
 
 class GENNDataset(InMemoryDataset):
     def __init__(self, emrc_pairs: list[tuple[EMRC, EMRC, torch.tensor]], 
@@ -44,12 +45,18 @@ class GENNDataset(InMemoryDataset):
                 emrc_1.get_representation(True)
             x_2, edge_index_2, cyclic_neighbors_2, neighbor_num_2 = \
                 emrc_2.get_representation(True)
-            data = GENNData(
-                x_1 = x_1, edge_index_1 = edge_index_1, 
-                cyclic_neighbors_1 = cyclic_neighbors_1, neighbor_num_1 = neighbor_num_1,
-                x_2 = x_2, edge_index_2 = edge_index_2, 
-                cyclic_neighbors_2 = cyclic_neighbors_2, neighbor_num_2 = neighbor_num_2,
-                distance = distance)                # distance: torch.tensor([float])
+            data = GENNData()
+            data['emrc_1'].x = x_1
+            data['emrc_1', 'emrc_1_edges', 'emrc_1'].edge_index = edge_index_1
+            data['emrc_1'].cyclic_neighbors = cyclic_neighbors_1
+            data['emrc_1'].neighbor_num = neighbor_num_1
+            data['emrc_1'].num_nodes = x_1.size()[0]
+            data['emrc_2'].x = x_2
+            data['emrc_2', 'emrc_2_edges', 'emrc_2'].edge_index = edge_index_2
+            data['emrc_2'].cyclic_neighbors = cyclic_neighbors_2
+            data['emrc_2'].neighbor_num = neighbor_num_2
+            data['emrc_2'].num_nodes = x_2.size()[0]
+            data.distance = distance
             data_list.append(data)
         data, slices = self.collate(data_list)
         torch.save((data, slices), self.processed_paths[0])
