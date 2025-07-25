@@ -70,19 +70,21 @@ class GENN(MessagePassing):
         hidden_dim = self.seq_model.hidden_size
 
         neighbor_feats = []
+        lengths_list = []
         for i in range(neighbor_num.size()[0]):
             neighbors_i = cyclic_neighbors[i, 0 : neighbor_num[i]]
             for j in range(neighbor_num[i]):
                 neighbor_feat = x[neighbors_i.roll(j, dims = 0)]
                 neighbor_feats.append(neighbor_feat)
+                lengths_list.append(neighbor_num[i])
         padded_feats = pad_sequence(neighbor_feats, batch_first=False)
-        packed_feats = pack_padded_sequence(padded_feats, neighbor_num.cpu(), 
+        lengths = torch.tensor(lengths_list, dtype=torch.long).cpu()
+        packed_feats = pack_padded_sequence(padded_feats, lengths=lengths, 
                                             batch_first=False, enforce_sorted=False)
-        neighbor_num = neighbor_num.to(x.device)        # Bring back from cpu
         _, h_n = self.seq_model(packed_feats)
         seq_out = torch.zeros(node_num, hidden_dim)     # size: (node_num, hidden_dim)
         seq_out = seq_out.to(x.device)
-        
+
         index = 0
         for i in range(node_num):                       # Sample anchored sequences
             seq_out[i, :] = h_n[-1, index : index + neighbor_num[i], :].mean(dim=0)
@@ -132,15 +134,21 @@ class SequentialPooling(nn.Module):
     Pooling model for converting node level features to grap level features
     """
 
-    def __init__(self, in_dim, out_dim, device=None, *args, **kwargs):
+    def __init__(self, in_dim, hidden_dim, out_dim, device=None, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self.seq_model = nn.RNN(
             input_size=in_dim,
-            hidden_size=out_dim,
+            hidden_size=hidden_dim,
             num_layers=2,
             batch_first=False,
             bidirectional=False,
             device=device
+        )
+
+        self.mlp = nn.Sequential(
+            nn.Linear(hidden_dim, hidden_dim, device=device),
+            nn.ReLU(),
+            nn.Linear(hidden_dim, out_dim, device=device)
         )
 
     def forward(self, x, node_count):
@@ -154,4 +162,4 @@ class SequentialPooling(nn.Module):
         packed_feats = pack_padded_sequence(padded_feats, node_count.cpu(), 
                                             batch_first=False, enforce_sorted=False)
         _, h_n = self.seq_model(packed_feats)
-        return h_n[-1]
+        return self.mlp(h_n[-1])

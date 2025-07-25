@@ -18,7 +18,7 @@ loader = DataLoader(dataset, batch_size=batch_size, shuffle=True)
 
 degree_embedding = DegreeEmbedding(embed_dim=16, device=device)
 gnn = GENN(16, 32, 32, device)
-pooling = SequentialPooling(32, 16, device)
+pooling = SequentialPooling(32, 32, 16, device)
 
 for epoch in range(epoch_num):
     for batch in loader:
@@ -49,5 +49,10 @@ for epoch in range(epoch_num):
 
         graph_feat_1 = pooling(x_gnnout_feat_1, torch.bincount(batch['emrc_1'].batch))
         graph_feat_2 = pooling(x_gnnout_feat_2, torch.bincount(batch['emrc_2'].batch))
+
+        graph_feat_diff = graph_feat_1 - graph_feat_2
+        predicted_distance = graph_feat_diff.norm(p=2, dim=-1)
+
+        loss = F.mse_loss(predicted_distance, distances)
         break
     break
