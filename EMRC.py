@@ -468,7 +468,7 @@ class EMRC(TMRC):
                 sibling_gripper = susp2gripper[-node2gripper[i] - 1]
                 susp2node[sibling_gripper] = i
         # Get x, edge_index and cyclic_neighbors for given node-gripper correspondance
-        x = torch.zeros(node_num, dtype=torch.float)
+        x = torch.zeros(node_num, dtype=torch.long)
         edge_index = torch.zeros(2, edge_num * 2,       # Undirected edges
                                  dtype=torch.long)
         cyclic_neighbors = torch.zeros(node_num, 3, dtype=torch.float)
@@ -478,7 +478,7 @@ class EMRC(TMRC):
             neighbors = []
             if node2gripper[i] >= 0:
                 if self.is_grip_w[node2gripper[i] // 3]:
-                    x[i] = 3.0
+                    x[i] = 2                            # degree = 3
                     for g in range(3):
                         gripper = node2gripper[i] + g
                         if self.grippers[gripper] >= 0:
@@ -488,7 +488,7 @@ class EMRC(TMRC):
                     if self.grip_polarities[node2gripper[i] // 3] < 0:
                         neighbors.reverse()
                 else:
-                    x[i] = 2.0
+                    x[i] = 1                            # degree = 2
                     for g in range(2):
                         gripper = node2gripper[i] + g
                         if self.grippers[gripper] >= 0:
@@ -496,14 +496,14 @@ class EMRC(TMRC):
                         else:
                             neighbors.append(susp2node[gripper])
             else:
-                x[i] = 1.0
+                x[i] = 0                                # degree = 1
                 neighbors = [gripper2node[susp2gripper[-node2gripper[i] - 1]]]
             for neighbor in neighbors:
                 edge_index[0, cur_edge] = i
                 edge_index[1, cur_edge] = neighbor
                 cur_edge = cur_edge + 1
             cyclic_neighbor = torch.tensor(neighbors, dtype=torch.long)
-            neighbor_num[i] = x[i].long()
+            neighbor_num[i] = x[i] + 1
             cyclic_neighbors[i, 0 : neighbor_num[i]] = cyclic_neighbor
         return x, edge_index, cyclic_neighbors, neighbor_num
     

@@ -46,25 +46,43 @@ class GENN(MessagePassing):
     def reset_parameters(self):
         return super().reset_parameters()
 
+    """
+        Model forward function for GNN message passing with sequence model
+
+        Parameters
+        ----------
+        x: torch.tensor
+            size: [num_nodes, in_dim]; dtype: torch.float
+        edge_index: torch.tensor
+            size: [2, num_edges]; dtype: torch.long
+        cyclic_neighbors: torch.tensor
+            size: [num_nodes, max_num_degree = 3]; dtype: torch.long
+        neighbor_num: torch.tensor
+            size: [num_nodes, ]; dtype: torch.long
+        """
     def forward(self, x: torch.Tensor, 
                 edge_index: torch.Tensor, 
                 cyclic_neighbors: torch.Tensor, 
                 neighbor_num: torch.Tensor):
-        # x: [num_nodes, in_dim], dtype: float
-        # edge_index: [2, num_edges], dtype: long
-        # cyclic_neighbors: [num_nodes, max_num_degree = 3], dtype: long
-        # neighbor_num: [num_nodes, ], dtype: long
+        node_num = x.size()[0]
+        hidden_dim = self.seq_model.hidden_size
 
         neighbor_feats = []
         for i in range(neighbor_num.size()[0]):
-            neighbor_feat = x[cyclic_neighbors[i, 0 : neighbor_num[i]]]
-            neighbor_feats.append(neighbor_feat)
+            nieghbors_i = cyclic_neighbors[i, 0 : neighbor_num[i]]
+            for j in range(neighbor_num[i]):
+                neighbor_feat = x[nieghbors_i.roll(j, dim = 0)]
+                neighbor_feats.append(neighbor_feat)
         padded_feats = pad_sequence(neighbor_feats, batch_first=False)
         packed_feats = pack_padded_sequence(padded_feats, neighbor_num, 
                                             batch_first=False, enforce_sorted=False)
-
         _, h_n = self.seq_model(packed_feats)
-        seq_out = h_n[-1]                               # size: (node_num, hidden_dim)
+        seq_out = torch.zeros(node_num, hidden_dim)     # size: (node_num, hidden_dim)
+        
+        index = 0
+        for i in range(node_num):                       # Sample anchored sequences
+            seq_out[i, :] = h_n[-1, index : index + neighbor_num[i], :].mean(dim=0)
+            index = index + neighbor_num[i]
 
         return self.propagate(edge_index, x=x, seq=seq_out, neighbor_num=neighbor_num)
 
@@ -87,3 +105,18 @@ class GENN(MessagePassing):
         out = self.update_mlp(torch.cat([x, aggr_out], dim=-1))
         out_norm = self.batch_norm(out)
         return out_norm
+
+class DegreeEmbedding(nn.Module):
+    """
+    Embed original one hot vectors from node derees into a higher dimension
+    """
+    def __init__(self, embed_dim, device=None, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.mlp = nn.Sequential(
+            nn.Linear(GENN.max_num_degree, embed_dim, device=device),
+            nn.ReLU(),
+            nn.Linear(embed_dim, embed_dim, device=device)
+        )
+
+    def forward(self, x):
+        return self.mlp(x)

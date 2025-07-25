@@ -10,7 +10,8 @@ import numpy as np
 sys.path.append('..')
 sys.path.append('../GENN')
 from EMRC import EMRC
-from GENN_data import GENNDataset
+from GENN_data import GENNData, GENNDataset
+torch.serialization.add_safe_globals([GENNData])
 
 rng = np.random.default_rng()
 seed_bias = rng.integers(100000, 1000000)
@@ -18,14 +19,12 @@ print(f"\033[94mseed_bias is: {seed_bias}\033[0m")
 
 module_number = 7
 rw_steps = [0, 1, 4, 9, 16, 25, 36]
-data_size_per_step = 1000
+data_size_per_step = 32768
 
 emrc_pairs = []
 
-# for i in tqdm(range(data_size_per_step * len(rw_steps))):
-for i in range(data_size_per_step * len(rw_steps)):
+for i in tqdm(range(data_size_per_step * len(rw_steps))):
     rw_step = rw_steps[i % len(rw_steps)]
-    # print(f"i is {i} and rw_step is {rw_step}")
     emrc_1 = EMRC.get_random_configuration(module_number, seed=i + seed_bias)
     emrc_2 = EMRC(w=emrc_1.w,
                   v=emrc_1.v,
