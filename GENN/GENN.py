@@ -1,5 +1,6 @@
 import torch
 from torch import nn
+import torch.nn.functional as F
 from torch.nn.utils.rnn import pad_sequence, pack_padded_sequence
 from torch_geometric.nn import MessagePassing
 
@@ -24,7 +25,8 @@ class GENN(MessagePassing):
         the device where this model is implemented
     """
     def __init__(self, in_dim, out_dim, hidden_dim, device=None):
-        super().__init__(aggr='add')                    # Sum
+        super().__init__(aggr='add',                    # Sum
+                         node_dim=0)
         self.seq_model = nn.RNN(
             in_dim,
             hidden_dim,
@@ -69,28 +71,31 @@ class GENN(MessagePassing):
 
         neighbor_feats = []
         for i in range(neighbor_num.size()[0]):
-            nieghbors_i = cyclic_neighbors[i, 0 : neighbor_num[i]]
+            neighbors_i = cyclic_neighbors[i, 0 : neighbor_num[i]]
             for j in range(neighbor_num[i]):
-                neighbor_feat = x[nieghbors_i.roll(j, dim = 0)]
+                neighbor_feat = x[neighbors_i.roll(j, dims = 0)]
                 neighbor_feats.append(neighbor_feat)
         padded_feats = pad_sequence(neighbor_feats, batch_first=False)
-        packed_feats = pack_padded_sequence(padded_feats, neighbor_num, 
+        packed_feats = pack_padded_sequence(padded_feats, neighbor_num.cpu(), 
                                             batch_first=False, enforce_sorted=False)
+        neighbor_num = neighbor_num.to(x.device)        # Bring back from cpu
         _, h_n = self.seq_model(packed_feats)
         seq_out = torch.zeros(node_num, hidden_dim)     # size: (node_num, hidden_dim)
+        seq_out = seq_out.to(x.device)
         
         index = 0
         for i in range(node_num):                       # Sample anchored sequences
             seq_out[i, :] = h_n[-1, index : index + neighbor_num[i], :].mean(dim=0)
             index = index + neighbor_num[i]
 
+        neighbor_num = neighbor_num.float()
         return self.propagate(edge_index, x=x, seq=seq_out, neighbor_num=neighbor_num)
 
     """
     Message passing from node j to node i
     """
-    def message(self, seq_i, neighbor_num_i):           # foo_i = foo[i]
-        return seq_i / neighbor_num_i                   # Normalization
+    def message(self, seq_i, neighbor_num_i):           # foo_i = foo[edge_index[0]]
+        return seq_i / neighbor_num_i.unsqueeze(-1)     # Normalization
 
     """
     Update aggregation output with original node feature
@@ -103,8 +108,9 @@ class GENN(MessagePassing):
     """
     def update(self, aggr_out, x):
         out = self.update_mlp(torch.cat([x, aggr_out], dim=-1))
-        out_norm = self.batch_norm(out)
-        return out_norm
+        out = self.batch_norm(out)
+        out = F.relu(out)
+        return out
 
 class DegreeEmbedding(nn.Module):
     """
@@ -120,3 +126,32 @@ class DegreeEmbedding(nn.Module):
 
     def forward(self, x):
         return self.mlp(x)
+    
+class SequentialPooling(nn.Module):
+    """
+    Pooling model for converting node level features to grap level features
+    """
+
+    def __init__(self, in_dim, out_dim, device=None, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.seq_model = nn.RNN(
+            input_size=in_dim,
+            hidden_size=out_dim,
+            num_layers=2,
+            batch_first=False,
+            bidirectional=False,
+            device=device
+        )
+
+    def forward(self, x, node_count):
+        x_mean = x.mean(dim=-1)
+        graph_feats = []
+        j = 0
+        for i in range(len(node_count)):
+            graph_feats.append(x[x_mean[j : j + node_count[i]].argsort() + j, :])
+            j = j + node_count[i]
+        padded_feats = pad_sequence(graph_feats, batch_first=False)
+        packed_feats = pack_padded_sequence(padded_feats, node_count.cpu(), 
+                                            batch_first=False, enforce_sorted=False)
+        _, h_n = self.seq_model(packed_feats)
+        return h_n[-1]

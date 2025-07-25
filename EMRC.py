@@ -471,7 +471,7 @@ class EMRC(TMRC):
         x = torch.zeros(node_num, dtype=torch.long)
         edge_index = torch.zeros(2, edge_num * 2,       # Undirected edges
                                  dtype=torch.long)
-        cyclic_neighbors = torch.zeros(node_num, 3, dtype=torch.float)
+        cyclic_neighbors = torch.zeros(node_num, 3, dtype=torch.long)
         neighbor_num = torch.zeros(node_num, dtype=torch.long)
         cur_edge = 0
         for i in range(node_num):
