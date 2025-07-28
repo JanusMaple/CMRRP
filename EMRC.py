@@ -565,40 +565,35 @@ class EMRC(TMRC):
         EMRC._is_model_ready = True
 
     @staticmethod
-    def get_distance(emrc_1, emrc_2):
+    def get_feature(emrc):
         if not EMRC._is_model_ready:
-            raise RuntimeError("Distance Estimation Failed: Model Missing")
-        x_1, edge_index_1, cyclic_neighbors_1, neighbor_num_1 = \
-            emrc_1.get_representation(True)
-        x_2, edge_index_2, cyclic_neighbors_2, neighbor_num_2 = \
-            emrc_2.get_representation(True)
-        
-        x_1 = x_1.to(EMRC._device)
-        edge_index_1 = edge_index_1.to(EMRC._device)
-        cyclic_neighbors_1 = cyclic_neighbors_1.to(EMRC._device)
-        neighbor_num_1 = neighbor_num_1.to(EMRC._device)
-        x_2 = x_2.to(EMRC._device)
-        edge_index_2 = edge_index_2.to(EMRC._device)
-        cyclic_neighbors_2 = cyclic_neighbors_2.to(EMRC._device)
-        neighbor_num_2 = neighbor_num_2.to(EMRC._device)
+            raise RuntimeError("Feature Extraction Failed: Missing Model")
+        x, edge_index, cyclic_neighbors, neighbor_num = emrc.get_representation(False)
+        x = x.to(EMRC._device)
+        edge_index = edge_index.to(EMRC._device)
+        cyclic_neighbors = cyclic_neighbors.to(EMRC._device)
+        neighbor_num = neighbor_num.to(EMRC._device)
+        x_oh = F.one_hot(x, EMRC.max_num_degree).float()
+        x_degree_feat = EMRC._degree_embedding(x_oh)
+        x_gnnout_feat = EMRC._gnn(
+            x_degree_feat, edge_index, cyclic_neighbors, neighbor_num)
+        graph_feat = EMRC._pooling(x_gnnout_feat, 
+                                   torch.tensor([x_gnnout_feat.size()[0]], 
+                                                dtype = torch.long))
+        return graph_feat
 
-        x_oh_1 = F.one_hot(x_1, EMRC.max_num_degree).float()
-        x_oh_2 = F.one_hot(x_2, EMRC.max_num_degree).float()
-        
-        x_degree_feat_1 = EMRC._degree_embedding(x_oh_1)
-        x_degree_feat_2 = EMRC._degree_embedding(x_oh_2)
-
-        x_gnnout_feat_1 = EMRC._gnn(
-            x_degree_feat_1, edge_index_1, cyclic_neighbors_1, neighbor_num_1)
-        x_gnnout_feat_2 = EMRC._gnn(
-            x_degree_feat_2, edge_index_2, cyclic_neighbors_2, neighbor_num_2)
-
-        graph_feat_1 = EMRC._pooling(x_gnnout_feat_1, 
-                                     torch.tensor([x_gnnout_feat_1.size()[0]], 
-                                                  dtype = torch.long))
-        graph_feat_2 = EMRC._pooling(x_gnnout_feat_2, 
-                                     torch.tensor([x_gnnout_feat_2.size()[0]], 
-                                                  dtype = torch.long))
+    @staticmethod
+    def get_distance(emrc_1=None, emrc_2=None, graph_feat_1=None, graph_feat_2=None):
+        if not EMRC._is_model_ready:
+            raise RuntimeError("Distance Estimation Failed: Missing Model")
+        if graph_feat_1 is None:
+            if emrc_1 is None:
+                raise RuntimeError("Distance Estimation Failed: Missing EMRC 1")
+            graph_feat_1 = EMRC.get_feature(emrc_1)
+        if graph_feat_2 is None:
+            if emrc_2 is None:
+                raise RuntimeError("Distance Estimation Failed: Missing EMRC 2")
+            graph_feat_2 = EMRC.get_feature(emrc_2)
 
         graph_feat_diff = graph_feat_1 - graph_feat_2
         predicted_distance = graph_feat_diff.norm(p=2, dim=-1)
