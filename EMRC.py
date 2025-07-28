@@ -1,4 +1,6 @@
 import torch
+import torch.nn.functional as F
+import numpy as np
 from TMRC import TMRC
 
 # Embedded Modular Robot Configuration
@@ -8,6 +10,12 @@ from TMRC import TMRC
 #   3. The orientation of modules in the cycles
 
 class EMRC(TMRC):
+    _degree_embedding = None
+    _gnn = None
+    _pooling = None
+    _device = None
+    _is_model_ready = False
+
     """
     Combinatorial Embedding of the Configuration on a Orientable 2D Surface.  
     
@@ -43,6 +51,18 @@ class EMRC(TMRC):
             self.grip_polarities = [gp for gp in grip_polarities]
 
         self.retro_action = None                            # The action that goes back
+
+    def copy(self):
+        return EMRC(w=self.w,
+                    v=self.v,
+                    n=self.n,
+                    m=self.m,
+                    grippers=self.grippers,
+                    gripper2module=self.gripper2module,
+                    module2gripper=self.module2gripper,
+                    rng=np.random.Generator(self.rng.bit_generator),
+                    loop_polarities=self.loop_polarities,
+                    grip_polarities=self.grip_polarities)
 
     # [m0, m1, ..., mc], if mi > 0 than it is from head to tail; otherwise tail to head
     def get_module_loop(self, real_cycle):
@@ -535,3 +555,53 @@ class EMRC(TMRC):
     def get_random_configuration(m, seed = None, w = None, v = None):
         params = EMRC.get_random_configuration_model(m, seed, w, v)
         return EMRC(*params)
+    
+    @staticmethod
+    def set_gnn_model(degree_embedding, gnn, pooling, device):
+        EMRC._degree_embedding = degree_embedding
+        EMRC._gnn = gnn
+        EMRC._pooling = pooling
+        EMRC._device = device
+        EMRC._is_model_ready = True
+
+    @staticmethod
+    def get_distance(emrc_1, emrc_2):
+        if not EMRC._is_model_ready:
+            raise RuntimeError("Distance Estimation Failed: Model Missing")
+        x_1, edge_index_1, cyclic_neighbors_1, neighbor_num_1 = \
+            emrc_1.get_representation(True)
+        x_2, edge_index_2, cyclic_neighbors_2, neighbor_num_2 = \
+            emrc_2.get_representation(True)
+        
+        x_1 = x_1.to(EMRC._device)
+        edge_index_1 = edge_index_1.to(EMRC._device)
+        cyclic_neighbors_1 = cyclic_neighbors_1.to(EMRC._device)
+        neighbor_num_1 = neighbor_num_1.to(EMRC._device)
+        x_2 = x_2.to(EMRC._device)
+        edge_index_2 = edge_index_2.to(EMRC._device)
+        cyclic_neighbors_2 = cyclic_neighbors_2.to(EMRC._device)
+        neighbor_num_2 = neighbor_num_2.to(EMRC._device)
+
+        x_oh_1 = F.one_hot(x_1, EMRC.max_num_degree).float()
+        x_oh_2 = F.one_hot(x_2, EMRC.max_num_degree).float()
+        
+        x_degree_feat_1 = EMRC._degree_embedding(x_oh_1)
+        x_degree_feat_2 = EMRC._degree_embedding(x_oh_2)
+
+        x_gnnout_feat_1 = EMRC._gnn(
+            x_degree_feat_1, edge_index_1, cyclic_neighbors_1, neighbor_num_1)
+        x_gnnout_feat_2 = EMRC._gnn(
+            x_degree_feat_2, edge_index_2, cyclic_neighbors_2, neighbor_num_2)
+
+        graph_feat_1 = EMRC._pooling(x_gnnout_feat_1, 
+                                     torch.tensor([x_gnnout_feat_1.size()[0]], 
+                                                  dtype = torch.long))
+        graph_feat_2 = EMRC._pooling(x_gnnout_feat_2, 
+                                     torch.tensor([x_gnnout_feat_2.size()[0]], 
+                                                  dtype = torch.long))
+
+        graph_feat_diff = graph_feat_1 - graph_feat_2
+        predicted_distance = graph_feat_diff.norm(p=2, dim=-1)
+
+        return predicted_distance
+    

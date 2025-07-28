@@ -6,6 +6,7 @@ import matplotlib.pyplot as plt
 # Topological Modular Robot Configuration
 class TMRC:
     grsp_identifier_2_id = [0, 2, 1]
+    max_num_degree = 3
     def __init__(self, w, v, n, m,
                 grippers, gripper2module, module2gripper, rng: np.random.Generator, 
                 c = None, G = None, mdl_cycles = None, grip_cycles = None

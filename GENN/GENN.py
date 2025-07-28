@@ -152,6 +152,7 @@ class SequentialPooling(nn.Module):
         )
 
     def forward(self, x, node_count):
+        # node_count: number of nodes in each graph within this batch
         x_mean = x.mean(dim=-1)
         graph_feats = []
         j = 0

@@ -15,14 +15,13 @@ class GENNData(HeteroData):
 
 class GENNDataset(InMemoryDataset):
     def __init__(self, emrc_pairs: list[tuple[EMRC, EMRC, torch.tensor]], 
-                 is_test = False, root = None, force_reload = False):
+                 is_test = False, root = 'random_walk', force_reload = False):
         self.emrc_pairs = emrc_pairs
         self.is_test = is_test
-        if root is None:
-            root = os.path.join(
-                os.path.dirname(os.path.abspath(__file__)),
-                'data'
-            )
+        root = os.path.join(
+            os.path.dirname(os.path.abspath(__file__)),
+            'data/' + root
+        )
         super().__init__(root, force_reload=force_reload, 
                          transform=None, pre_transform=None, pre_filter=None)
         self.load(self.processed_paths[0])
