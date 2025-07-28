@@ -15,8 +15,9 @@ class GENNData(HeteroData):
 
 class GENNDataset(InMemoryDataset):
     def __init__(self, emrc_pairs: list[tuple[EMRC, EMRC, torch.tensor]], 
-                 root = None, force_reload = False):
+                 is_test = False, root = None, force_reload = False):
         self.emrc_pairs = emrc_pairs
+        self.is_test = is_test
         if root is None:
             root = os.path.join(
                 os.path.dirname(os.path.abspath(__file__)),
@@ -32,7 +33,10 @@ class GENNDataset(InMemoryDataset):
 
     @property
     def processed_file_names(self):
-        return ["data.pt"]
+        if self.is_test:
+            return ["data_test.pt"]
+        else:
+            return ["data.pt"]
 
     def download(self):
         pass                                        # TODO: Upload dataset to internet

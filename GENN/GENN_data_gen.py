@@ -41,4 +41,4 @@ for i in tqdm(range(data_size_per_step * len(rw_steps))):
     distance = torch.tensor([np.sqrt(rw_step)], dtype=torch.float)
     emrc_pairs.append((emrc_1, emrc_2, distance))
 
-dataset = GENNDataset(emrc_pairs=emrc_pairs, force_reload=True)
+dataset = GENNDataset(emrc_pairs=emrc_pairs, is_test=False, force_reload=True)

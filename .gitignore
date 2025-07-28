@@ -2,4 +2,5 @@ __pycache__/
 Experiments/
 GMRC_ARC.py
 GENN/data/
+GENN/model/
 GENN/data/processed/data.pt

@@ -1,7 +1,8 @@
+from tqdm import tqdm
+
 import torch
 import torch.nn.functional as F
 from torch_geometric.data import DataLoader
-from torch_geometric.nn import global_mean_pool
 
 from GENN import GENN, DegreeEmbedding, SequentialPooling
 from GENN_data import GENNDataset
@@ -9,7 +10,7 @@ from GENN_data import GENNDataset
 """
 Traning Parameters
 """
-epoch_num = 1
+epoch_num = 20
 batch_size = 32
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
@@ -20,8 +21,20 @@ degree_embedding = DegreeEmbedding(embed_dim=16, device=device)
 gnn = GENN(16, 32, 32, device)
 pooling = SequentialPooling(32, 32, 16, device)
 
+optimizer = torch.optim.Adam(
+    list(degree_embedding.parameters()) +
+    list(gnn.parameters()) + 
+    list(pooling.parameters()),
+    lr=1e-3, weight_decay=1e-5)
+
 for epoch in range(epoch_num):
-    for batch in loader:
+    gnn.train()
+    pooling.train()
+    degree_embedding.train()
+    total_loss = 0
+    for batch in tqdm(loader, desc=f"Epoch {epoch+1}", leave=False):
+        optimizer.zero_grad()
+
         x_1 = batch.x_dict['emrc_1'].to(device)
         edge_index_1 = batch.edge_index_dict[
             ('emrc_1', 'emrc_1_edges', 'emrc_1')].to(device)
@@ -54,5 +67,16 @@ for epoch in range(epoch_num):
         predicted_distance = graph_feat_diff.norm(p=2, dim=-1)
 
         loss = F.mse_loss(predicted_distance, distances)
-        break
-    break
+        loss.backward()
+        optimizer.step()
+
+        total_loss = total_loss + loss.item()
+
+    print(f"Epoch {epoch+1} | Loss: {total_loss:.4f}")
+
+torch.save({
+    'gnn': gnn.state_dict(),
+    'degree_embedding': degree_embedding.state_dict(),
+    'pooling': pooling.state_dict()
+}, "model/model_checkpoint.pth")
+
