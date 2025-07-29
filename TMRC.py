@@ -79,8 +79,8 @@ class TMRC:
         self.n = n
         self.m = m
         self.grippers = [gripper for gripper in grippers]
-        self.gripper2module = [g2m for g2m in gripper2module]
-        self.module2gripper = [m2g for m2g in module2gripper]
+        self.gripper2module = copy.deepcopy(gripper2module)
+        self.module2gripper = copy.deepcopy(module2gripper)
         self.rng = rng
 
         if c is None:
@@ -96,17 +96,17 @@ class TMRC:
         if mdl_cycles is None:
             self.mdl_cycles = self.get_mdl_cycles()
         else:
-            self.mdl_cycles = [mc for mc in mdl_cycles]
+            self.mdl_cycles = copy.deepcopy(mdl_cycles)
 
         if grip_cycles is None:
             self.grip_cycles = [self.get_grip_cycle(c) for c in self.mdl_cycles]
         else:
-            self.grip_cycles = [gc for gc in grip_cycles]
+            self.grip_cycles = copy.deepcopy(grip_cycles)
 
         if real_cycles is None:
             self.real_cycles = [self.get_real_cycle(c) for c in self.mdl_cycles]
         else:
-            self.real_cycles = [rc for rc in real_cycles]
+            self.real_cycles = copy.deepcopy(real_cycles)
 
         if is_grip_w is None:
             self.is_grip_w = self.get_is_grip_w()

@@ -11,6 +11,8 @@ import numpy as np
 parser = argparse.ArgumentParser(description="Select data generation mode: RW/BFS")
 parser.add_argument('--mode', type=str, default="rw",
                     help='Generation Mode: rw or bfs')
+parser.add_argument('--test', action='store_true',
+                    help='Whether generating data for test set')
 args = parser.parse_args()
 if args.mode == "rw":
     print("Generating data with inaccurate distance using random walk")
@@ -27,7 +29,15 @@ from EMRC import EMRC
 from GENN_data import GENNDataset
 from GENN import GENN, DegreeEmbedding, SequentialPooling
 
-if args.mode == "bfs":
+module_number = 7
+rng = np.random.default_rng()
+seed_bias = rng.integers(100000, 1000000)
+print(f"\033[94mseed_bias is: {seed_bias}\033[0m")
+
+if args.mode == "rw":
+    distances = [0, 1, 2, 3, 4, 5, 6]
+elif args.mode == "bfs":
+    distances = [0, 1, 2, 3, 4]
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     degree_embedding = DegreeEmbedding(embed_dim=16, device=device)
     gnn = GENN(16, 32, 32, device)
@@ -36,14 +46,12 @@ if args.mode == "bfs":
     gnn.load_state_dict(checkpoint['gnn'])
     pooling.load_state_dict(checkpoint['pooling'])
     degree_embedding.load_state_dict(checkpoint['degree_embedding'])
+    EMRC.set_gnn_model(degree_embedding, gnn, pooling, device)
 
-rng = np.random.default_rng()
-seed_bias = rng.integers(100000, 1000000)
-print(f"\033[94mseed_bias is: {seed_bias}\033[0m")
-
-module_number = 7
-distances = [0, 1, 2, 3, 4, 5, 6]
-data_size_per_step = 32768
+if args.test:
+    data_size_per_step = 1024
+else:
+    data_size_per_step = 32768
 
 emrc_pairs = []
 
@@ -59,6 +67,9 @@ def get_all_emrc_at_distance(emrcs: list[EMRC], dis: int, ban_list=list[torch.te
 
     ban_list: List of all banned EMRCs' graph feature tensors
     """
+    if dis == 0:
+        return emrcs
+
     front_emrcs = []
     for emrc in emrcs:
         actions = emrc.get_all_actions()
@@ -76,22 +87,23 @@ def get_all_emrc_at_distance(emrcs: list[EMRC], dis: int, ban_list=list[torch.te
             if not is_banned:
                 front_emrcs.append(new_emrc)
                 ban_list.append(new_feature)
-    if dis == 1:
-        return front_emrcs
-    else:
-        return get_all_emrc_at_distance(front_emrcs, dis - 1, ban_list)
+    
+    return get_all_emrc_at_distance(front_emrcs, dis - 1, ban_list)
 
 for i in tqdm(range(data_size_per_step * len(distances))):
     emrc_1 = EMRC.get_random_configuration(module_number, seed=i + seed_bias)
+    distance = distances[i % len(distances)]
     if args.mode == "rw":
         emrc_2 = emrc_1.copy()
-        rw_step = distances[i % len(distances)] * distances[i % len(distances)]
+        rw_step = distance * distance
         for j in range(rw_step):
             emrc_2.execute_random_action()
-        distance = torch.tensor([distances[i % len(distances)]], dtype=torch.float)
     elif args.mode == "bfs":
-        # TODO: Random select one emrc from the front
-        pass
-    emrc_pairs.append((emrc_1, emrc_2, distance))
+        emrcs = get_all_emrc_at_distance([emrc_1], distance, [])
+        emrc_2 = emrcs[rng.choice(len(emrcs))]
+    emrc_pairs.append((emrc_1, emrc_2, torch.tensor([distance], dtype=torch.float)))
 
-dataset = GENNDataset(emrc_pairs=emrc_pairs, is_test=False, root=root, force_reload=True)
+dataset = GENNDataset(emrc_pairs=emrc_pairs,
+                      is_test=args.test,
+                      root=root,
+                      force_reload=True)
