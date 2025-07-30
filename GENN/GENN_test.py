@@ -1,5 +1,6 @@
 from tqdm import tqdm
 
+import argparse
 import torch
 import torch.nn.functional as F
 from torch_geometric.data import DataLoader
@@ -16,16 +17,35 @@ import pandas as pd
 Test Model
 """
 
+parser = argparse.ArgumentParser(description="Select data generation mode: RW/BFS")
+parser.add_argument('--mode', type=str, default="rw",
+                    help='Generation Mode: rw or bfs')
+args = parser.parse_args()
+if args.mode == "rw":
+    print("Generating data with inaccurate distance using random walk")
+    root = "random_walk"
+    model_path = "model/rw_trained_model.pth"
+    dis_label_num = 7
+    xlabel_string = "Random Walk Distance"
+elif args.mode == "bfs":
+    print("Generating data with exact distance using breadth first search")
+    root = "breadth_first_search"
+    model_path = "model/bfs_trained_model.pth"
+    dis_label_num = 5
+    xlabel_string = "BFS Distance"
+else:
+    raise ValueError("\033[91mWrong mode for testing model: use rw or bfs\033[0m")
+
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
-dataset = GENNDataset(emrc_pairs=None, is_test=True)
+dataset = GENNDataset(emrc_pairs=None, is_test=True, root=root)
 loader = DataLoader(dataset, batch_size=32, shuffle=False)
 
 degree_embedding = DegreeEmbedding(embed_dim=16, device=device)
 gnn = GENN(16, 32, 32, device)
 pooling = SequentialPooling(32, 32, 16, device)
 
-checkpoint = torch.load("model/model_checkpoint.pth", map_location=device)
+checkpoint = torch.load(model_path, map_location=device)
 gnn.load_state_dict(checkpoint['gnn'])
 pooling.load_state_dict(checkpoint['pooling'])
 degree_embedding.load_state_dict(checkpoint['degree_embedding'])
@@ -33,8 +53,6 @@ degree_embedding.load_state_dict(checkpoint['degree_embedding'])
 gnn.eval()
 pooling.eval()
 degree_embedding.eval()
-
-dis_label_num = 7
 
 grouped_pre_dis = [torch.tensor([], dtype=torch.float).to(device)] * dis_label_num
 
@@ -70,7 +88,8 @@ for batch in tqdm(loader):
     graph_feat_diff = graph_feat_1 - graph_feat_2
     predicted_distance = graph_feat_diff.norm(p=2, dim=-1)
     
-    grouped_pre_dis_b = [predicted_distance[distances == i] for i in range(7)]
+    grouped_pre_dis_b = [predicted_distance[distances == i]
+                         for i in range(dis_label_num)]
 
     for i in range(len(grouped_pre_dis)):
         grouped_pre_dis[i] = torch.cat((grouped_pre_dis[i], grouped_pre_dis_b[i]))
@@ -90,6 +109,6 @@ df = pd.DataFrame({
 
 sns.boxplot(x='group', y='value', data=df)
 plt.title("Model Test Results")
-plt.xlabel("Random Walk Distance")
+plt.xlabel(xlabel_string)
 plt.ylabel("Model Predicted Distance")
 plt.show()

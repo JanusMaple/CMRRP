@@ -99,7 +99,7 @@ for i in tqdm(range(data_size_per_step * len(distances))):
         for j in range(rw_step):
             emrc_2.execute_random_action()
     elif args.mode == "bfs":
-        emrcs = get_all_emrc_at_distance([emrc_1], distance, [])
+        emrcs = get_all_emrc_at_distance([emrc_1], distance, [emrc_1.get_feature()])
         emrc_2 = emrcs[rng.choice(len(emrcs))]
     emrc_pairs.append((emrc_1, emrc_2, torch.tensor([distance], dtype=torch.float)))
 

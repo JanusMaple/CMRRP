@@ -1,11 +1,27 @@
 from tqdm import tqdm
 
+import argparse
 import torch
 import torch.nn.functional as F
 from torch_geometric.data import DataLoader
 
 from GENN import GENN, DegreeEmbedding, SequentialPooling
 from GENN_data import GENNDataset
+
+parser = argparse.ArgumentParser(description="Select data generation mode: RW/BFS")
+parser.add_argument('--mode', type=str, default="rw",
+                    help='Generation Mode: rw or bfs')
+args = parser.parse_args()
+if args.mode == "rw":
+    print("Generating data with inaccurate distance using random walk")
+    root = "random_walk"
+    model_path = "model/rw_trained_model.pth"
+elif args.mode == "bfs":
+    print("Generating data with exact distance using breadth first search")
+    root = "breadth_first_search"
+    model_path = "model/bfs_trained_model.pth"
+else:
+    raise ValueError("\033[91mWrong mode for training model: use rw or bfs\033[0m")
 
 """
 Traning Parameters
@@ -14,7 +30,7 @@ epoch_num = 20
 batch_size = 32
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
-dataset = GENNDataset(None)
+dataset = GENNDataset(emrc_pairs=None, is_test=False, root=root)
 loader = DataLoader(dataset, batch_size=batch_size, shuffle=True)
 
 degree_embedding = DegreeEmbedding(embed_dim=16, device=device)
@@ -78,5 +94,5 @@ torch.save({
     'gnn': gnn.state_dict(),
     'degree_embedding': degree_embedding.state_dict(),
     'pooling': pooling.state_dict()
-}, "model/model_checkpoint.pth")
+}, model_path)
 
