@@ -26,7 +26,8 @@ else:
 """
 Traning Parameters
 """
-epoch_num = 20
+max_epoch_num = 100
+early_stop_threshold = 0.005
 batch_size = 32
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
@@ -39,11 +40,13 @@ pooling = SequentialPooling(32, 32, 16, device)
 
 optimizer = torch.optim.Adam(
     list(degree_embedding.parameters()) +
-    list(gnn.parameters()) + 
+    list(gnn.parameters()) +
     list(pooling.parameters()),
     lr=1e-3, weight_decay=1e-5)
 
-for epoch in range(epoch_num):
+last_loss = None
+largest_error = None
+for epoch in range(max_epoch_num):
     gnn.train()
     pooling.train()
     degree_embedding.train()
@@ -89,6 +92,14 @@ for epoch in range(epoch_num):
         total_loss = total_loss + loss.item()
 
     print(f"Epoch {epoch+1} | Loss: {total_loss:.4f}")
+    if last_loss is not None:
+        if largest_error is not None:
+            new_loss = last_loss - total_loss
+            if new_loss / largest_error < early_stop_threshold:
+                break
+        else:
+            largest_error = last_loss - total_loss
+    last_loss = total_loss
 
 torch.save({
     'gnn': gnn.state_dict(),
