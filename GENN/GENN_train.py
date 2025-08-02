@@ -106,4 +106,3 @@ torch.save({
     'degree_embedding': degree_embedding.state_dict(),
     'pooling': pooling.state_dict()
 }, model_path)
-

@@ -9,6 +9,7 @@ import networkx as nx
 import matplotlib.pyplot as plt
 from PIL import Image
 import io
+import copy
 from scipy.optimize import minimize
 class EarlyStop(Exception):
     def __init__(self, x, value):
@@ -724,7 +725,7 @@ class GMRC(EMRC):
         return dd_error
 
     # Get a formed loop error condiering both loop angle and loop dock for y
-    def get_loop_error_con_all_y(self, y):                                      # Constraint
+    def get_loop_error_con_all_y(self, y):                                  # Constraint
         loop_angle_error = 0
         loop_dock_error = 0
         for i in range(self.c - 1):
@@ -834,6 +835,9 @@ class GMRC(EMRC):
         print("-----------------------------------------------------------------")
         self.print_all_angs()
 
+    def copy(self):
+        return copy.deepcopy(self)
+
     # Get loop-dock error for a single loop
     @staticmethod
     def get_single_loop_dock_error(betas, gammas, l):
@@ -867,7 +871,7 @@ class GMRC(EMRC):
     
     # Get module collider, includinh bounding box and body linestring
     @staticmethod
-    def get_module_collider(geometry): 
+    def get_module_collider(geometry):
         angs, xy = GMRC.get_mdl_seg_geo(geometry[0], geometry[1], geometry[2])
 
         inner_pts = np.zeros((GMRC.num_seg_lens, 2))
