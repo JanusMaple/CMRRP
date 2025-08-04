@@ -1,5 +1,5 @@
 """
-Continuum Modular Robot Reconfigure Planner
+Continuum Modular Robot Reconfigure Planner: Task and Motion Planning
 """
 
 import sys
@@ -9,7 +9,7 @@ from EMRC import EMRC
 from GMRC import GMRC
 from GENN import GENN, DegreeEmbedding, SequentialPooling
 
-class RCPlanner:
+class CMRRP:
     def __init__(self, g: GENN, d: DegreeEmbedding, s: SequentialPooling):
         self.genn = g
         self.degree_embedding = d

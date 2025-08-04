@@ -1,5 +1,5 @@
 """
-Modular Robot Configuration Motion Planning Manifold
+Constraint Manifold for Modular Robot Configuration Motion Planning
 """
 
 import sys
@@ -8,7 +8,7 @@ import torch
 torch.pi = torch.acos(torch.zeros(1)).item() * 2
 from GMRC import GMRC
 
-class MRCMPM:
+class CMMRC:
     """
     Extracts key parameters for representing the constraint manifold
 
@@ -47,19 +47,31 @@ class MRCMPM:
             )
 
     def constraint_func(self, x: torch.tensor):
-        loop_angle_error = 0
-        loop_dock_error = 0
+        error = torch.zeros(2 * self.constraint_num, 
+                            dtype=torch.double, 
+                            device=self.device)
         for i in range(self.constraint_num):
             betas = x[self.ba_i_loops[i]] * self.bas_loops[i]
             gammas = self.gammas_list[i]
             ang_sum_tar = self.ang_sum_tars[i]
             loop_length = len(self.ba_i_loops[i])
-            loop_angle_error = loop_angle_error + \
-                torch.abs(torch.sum(betas) + torch.sum(gammas) - ang_sum_tar)
-            loop_dock_error = loop_dock_error + \
-                self.get_single_loop_dock_error(betas, gammas, loop_length)
+            loop_angle_error = torch.abs(
+                torch.sum(betas) + torch.sum(gammas) - ang_sum_tar
+                )
+            loop_dock_error = self.get_single_loop_dock_error(betas, gammas, loop_length)
+            error[2 * i] = loop_angle_error
+            error[2 * i + 1] = loop_dock_error
             
-        return loop_angle_error + loop_dock_error
+        return error
+
+    def is_rejecting(self, x: torch.tensor):
+        in_boundary = (x >= -GMRC.mdl_ang_cap) & (x <= GMRC.mdl_ang_cap)
+        if not in_boundary.any():
+            return True
+        self.avatar.bend_angs = x.cpu().numpy()
+        self.avatar.update_all_module_geometry()
+        self.avatar.update_all_module_collider()
+        return self.avatar.is_collision_detected()
     
     @staticmethod
     def get_single_loop_dock_error(betas: torch.Tensor, 
@@ -81,7 +93,7 @@ class MRCMPM:
 
         gamma_cml = torch.cumsum(gammas, dim=0) - gammas[0]
         alphas = beta_cml + gamma_cml
-        
+
         a = a.squeeze(-1)
         b = b.squeeze(-1)
 
