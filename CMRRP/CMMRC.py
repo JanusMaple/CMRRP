@@ -47,7 +47,7 @@ class CMMRC:
             )
 
     def constraint_func(self, x: torch.tensor):
-        error = torch.zeros(2 * self.constraint_num, 
+        error = torch.zeros(3 * self.constraint_num, 
                             dtype=torch.float, 
                             device=self.device)
         for i in range(self.constraint_num):
@@ -58,9 +58,10 @@ class CMMRC:
             loop_angle_error = torch.abs(
                 torch.sum(betas) + torch.sum(gammas) - ang_sum_tar
                 )
-            loop_dock_error = self.get_single_loop_dock_error(betas, gammas, loop_length)
+            dx, dy = self.get_single_loop_dock_error(betas, gammas, loop_length)
             error[2 * i] = loop_angle_error
-            error[2 * i + 1] = loop_dock_error
+            error[2 * i + 1] = dx
+            error[2 * i + 2] = dy
             
         return error
 
@@ -100,4 +101,4 @@ class CMMRC:
         delta_x = torch.sum(a * torch.cos(alphas) - b * torch.sin(alphas))
         delta_y = torch.sum(a * torch.sin(alphas) + b * torch.cos(alphas))
 
-        return torch.sqrt(delta_x ** 2 + delta_y ** 2)
+        return delta_x, delta_y
