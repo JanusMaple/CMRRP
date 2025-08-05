@@ -48,7 +48,7 @@ class CMMRC:
 
     def constraint_func(self, x: torch.tensor):
         error = torch.zeros(2 * self.constraint_num, 
-                            dtype=torch.double, 
+                            dtype=torch.float, 
                             device=self.device)
         for i in range(self.constraint_num):
             betas = x[self.ba_i_loops[i]] * self.bas_loops[i]
