@@ -228,11 +228,14 @@ class AtlasRRTree:
         for i in range(len(self.nodes)):
             if chart is not None:                   # Search only ego and neighbor charts
                 node_chart_index = self.chart_indexes[i]
-                if not chart.index == node_chart_index:
-                    continue
+                is_skip = True
+                if chart.index == node_chart_index:
+                    is_skip = False
                 for neighbor_chart in chart.neighbor_charts:
-                    if not neighbor_chart.index == node_chart_index:
-                        continue
+                    if neighbor_chart.index == node_chart_index:
+                        is_skip = False
+                if is_skip:
+                    continue
             node = self.nodes[i]
             dis = torch.norm(node.x - xr)           # Approximate using metric distance
             if dis < nearest_dis:
@@ -241,7 +244,7 @@ class AtlasRRTree:
         return nearest_node_index
     
     """
-    Extend from current tree to a given ambient space point and return ending node x
+    Extend from current tree to a given ambient space point and return ending node index
 
     Parameters:
     ----------
@@ -252,13 +255,13 @@ class AtlasRRTree:
     is_explore: bool
         Whether the extension is exploring or connecting
     """
-    def extend(self, xr, node_index, is_explore) -> torch.tensor:
+    def extend(self, xr, node_index, is_explore) -> int:
         pass
 
     """
-    Get the path from root to xl, which is a list of ambient space coordinates
+    Get the path from root to a node, its index is given as the parameter
     """
-    def get_path(self, xl) -> list:
+    def get_path(self, node_index) -> list:
         return []                                   # TODO
 
 class AtlasRRTPlanner:
@@ -290,11 +293,13 @@ class AtlasRRTPlanner:
             chart, ur = trees[i].sample()
             xr = chart.psi(ur)
             node_index_0 = trees[i].get_nearest_node(xr, chart)
-            xl0 = trees[i].extend(xr, node_index_0, is_explore=True)
+            ni0 = trees[i].extend(xr, node_index_0, is_explore=True)
+            xl0 = trees[i].nodes[ni0].x
             node_index_1 = trees[1 - i].get_nearest_node(xr)
-            xl1 = trees[1 - i].extend(xr, node_index_1, is_explore=False)
+            ni1 = trees[1 - i].extend(xr, node_index_1, is_explore=False)
+            xl1 = trees[1 - i].nodes[ni1].x
             if torch.norm(xl0 - xl1, 2) < AtlasRRTree.delta:
                 break
             i = 1 - i
-        return trees[i].get_path(xl0) + trees[1 - i].get_path(xl1).reverse()
+        return trees[i].get_path(ni0) + trees[1 - i].get_path(ni1).reverse()
     
