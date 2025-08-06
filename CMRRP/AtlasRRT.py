@@ -41,7 +41,7 @@ class Chart:
 
         self.index = index
 
-        _, _, Vh = torch.linalg.svd(J)
+        _, _, Vh = torch.linalg.svd(self.J)
         self.Phi = Vh.T[:, self.n - self.k:]            # Orthogonal Basis
 
         """
@@ -63,7 +63,7 @@ class Chart:
     def psi(self, u: torch.tensor):
         x_init = self.phi(u)                            # Initialize using approximation
         x = x_init.clone()
-        for i in range(Chart.max_iteration):
+        for _ in range(Chart.max_iteration):
             b = torch.tensor([[self.F(x)], [self.Phi.T @ (x - self.x_init)]])
             if torch.norm(b, p=2) <= Chart.eps:
                 break
