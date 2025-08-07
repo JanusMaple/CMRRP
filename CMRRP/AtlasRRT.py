@@ -15,9 +15,9 @@ class Chart:
     max_iteration = 500                                 # Time limit for exponential map
     eps = 1e-4                                          # Accuracy for exponential map
 
-    epsilon = 2e-2                                      # Chart validity error
-    alpha = torch.tensor(torch.pi / 2, device = device) # Chart validaty curvature
-    rho = 6e-2                                          # Chart validaty spam
+    epsilon = 5e-2                                      # Chart validity error
+    alpha = torch.tensor(torch.pi / 3, device = device) # Chart validaty curvature
+    rho = 1e-1                                          # Chart validaty spam
     beta = 2.0                                          # Exploration speed
 
     rho_s = rho * beta                                  # Sample Range
@@ -103,7 +103,7 @@ class Chart:
             _, _, Vh = torch.linalg.svd(Jx)
             Phi_x = Vh.T[:, self.n - self.k:]
             curvature_index = torch.linalg.matrix_norm(self.Phi.T @ Phi_x, ord=2)
-        if curvature_index > torch.cos(Chart.alpha):
+        if curvature_index < torch.cos(Chart.alpha):
             return False
 
         return True
@@ -291,7 +291,7 @@ class AtlasRRTNode:
         self.u = c.psi_inv(self.x)
 
 class AtlasRRTree:
-    delta = 2e-3                                    # Step of branch extension
+    delta = 1e-2                                    # Step of branch extension
     lambda_ = 3.0                                   # Branch length regularization
 
     """
@@ -394,7 +394,7 @@ class AtlasRRTree:
             xn = node.x
             ur = chart.psi_inv(xr)
             if is_explore:                          # Scale to minimum branch length
-                ur = ur * (path_length - path_len_lb) / torch.norm(ur, p = 2)
+                ur = ur * (path_len_lb - path_length) / torch.norm(ur, p = 2)
                 xr = chart.phi(ur)
             if torch.norm(ur - un, p = 2) < AtlasRRTree.delta:
                 break                               # STOP: If close enough to target
@@ -437,7 +437,8 @@ class AtlasRRTree:
                 break
             path.append(node.x)
             node = node.parent
-        return path.reverse()
+        path.reverse()
+        return path
 
 class AtlasRRTPlanner:
     """
@@ -476,5 +477,8 @@ class AtlasRRTPlanner:
             if torch.norm(xl0 - xl1, 2) < AtlasRRTree.delta:
                 break
             i = 1 - i
-        return trees[i].get_path(ni0) + trees[1 - i].get_path(ni1).reverse()
+        path_1st_half = trees[i].get_path(ni0)
+        path_2nd_half = trees[1 - i].get_path(ni1)
+        path_2nd_half.reverse()
+        return path_1st_half + path_2nd_half
     
