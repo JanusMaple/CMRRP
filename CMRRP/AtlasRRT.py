@@ -5,6 +5,7 @@ Reference:
     https://journals.sagepub.com/doi/pdf/10.1177/0278364919868530
 """
 
+import time
 import torch
 from torch.autograd.functional import jacobian
 
@@ -462,9 +463,10 @@ class AtlasRRTPlanner:
         self.Ts = AtlasRRTree(xs, self.atlas, self.atlas.get_chart(0), Collision)
         self.Tg = AtlasRRTree(xg, self.atlas, self.atlas.get_chart(1), Collision)
 
-    def plan(self):
+    def plan(self, time_budget = 60.0):
         trees = [self.Ts, self.Tg]
         i = 0
+        start_time = time.time()
         while True:
             chart, ur = trees[i].sample()
             xr = chart.psi(ur)
@@ -476,6 +478,9 @@ class AtlasRRTPlanner:
             xl1 = trees[1 - i].nodes[ni1].x
             if torch.norm(xl0 - xl1, 2) < AtlasRRTree.delta:
                 break
+            if time.time() - start_time > time_budget:
+                print("\033[91mRunning out of time budget!\033[0m")
+                return []
             i = 1 - i
         path_1st_half = trees[i].get_path(ni0)
         path_2nd_half = trees[1 - i].get_path(ni1)
