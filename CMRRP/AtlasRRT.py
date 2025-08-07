@@ -9,15 +9,18 @@ import torch
 from torch.autograd.functional import jacobian
 
 class Chart:
+    device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+
     tol = 1e-6                                          # Accuracy for calculating Φ
     max_iteration = 500                                 # Time limit for exponential map
     eps = 1e-4                                          # Accuracy for exponential map
 
-    epsilon = 1e-3                                      # Chart validity error
-    alpha = torch.pi / 2                                # Chart validaty curvature
-    rho = 5e-3                                          # Chart validaty spam
+    epsilon = 2e-2                                      # Chart validity error
+    alpha = torch.tensor(torch.pi / 2, device = device) # Chart validaty curvature
+    rho = 6e-2                                          # Chart validaty spam
+    beta = 2.0                                          # Exploration speed
 
-    rho_s = 1e-2                                        # Sample Range
+    rho_s = rho * beta                                  # Sample Range
 
     """
     A single chart in an atlas
@@ -35,9 +38,10 @@ class Chart:
         self.xc = xc
         self.J = jacobian(F, xc)                        # Should be full rank
         self.F = F
+        if self.J.ndim == 1:
+            self.J = self.J.unsqueeze(0)
         self.n = self.J.size()[1]
-        self.k = self.J.size()[1] - self.J.size[0]
-        self.device = xc.device
+        self.k = self.J.size()[1] - self.J.size()[0]
 
         self.index = index
 
@@ -64,7 +68,10 @@ class Chart:
         x_init = self.phi(u)                            # Initialize using approximation
         x = x_init.clone()
         for _ in range(Chart.max_iteration):
-            b = torch.tensor([[self.F(x)], [self.Phi.T @ (x - self.x_init)]])
+            b1 = self.F(x)
+            b1 = b1.view(-1) if b1.ndim == 0 else b1
+            b2 = self.Phi.T @ (x - x_init)
+            b = torch.cat([b1, b2], dim = 0)
             if torch.norm(b, p=2) <= Chart.eps:
                 break
             A = torch.vstack([self.J, self.Phi.T])
@@ -284,7 +291,7 @@ class AtlasRRTNode:
         self.u = c.psi_inv(self.x)
 
 class AtlasRRTree:
-    delta = 2e-4                                    # Step of branch extension
+    delta = 2e-3                                    # Step of branch extension
     lambda_ = 3.0                                   # Branch length regularization
 
     """
@@ -318,7 +325,7 @@ class AtlasRRTree:
                                      dtype=torch.long, device=self.device)
         counts = torch.bincount(node_charts)
         nonzero_mask = counts > 0
-        weights = torch.zeros_like(counts, device=self.device)
+        weights = torch.zeros_like(counts, dtype=torch.float, device=self.device)
         weights[nonzero_mask] = 1.0 / (counts[nonzero_mask].float() + 1.0)
         probs = weights / weights.sum()
         while True:
@@ -404,8 +411,7 @@ class AtlasRRTree:
                     if not is_explore and chart.is_reached_by(self):
                         break                       # STOP: Prevent excessive refinement
             else:                                   # A new chart needs to be created
-                last_node = self.nodes[branch[-2]]
-                self.atlas.add_chart(last_node.x)
+                self.atlas.add_chart(node.x)
                 chart_created = True
                 chart = node.chart                  # Now it should have changed
             self.nodes.append(AtlasRRTNode(self.node_num, xj, chart, None, self, node))
