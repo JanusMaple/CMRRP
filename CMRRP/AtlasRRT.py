@@ -394,9 +394,6 @@ class AtlasRRTree:
             un = node.u
             xn = node.x
             ur = chart.psi_inv(xr)
-            if is_explore:                          # Scale to minimum branch length
-                ur = ur * (path_len_lb - path_length) / torch.norm(ur, p = 2)
-                xr = chart.phi(ur)
             if torch.norm(ur - un, p = 2) < AtlasRRTree.delta:
                 break                               # STOP: If close enough to target
             uj = un + (ur - un) * AtlasRRTree.delta / torch.norm(ur - un, p = 2)
@@ -469,7 +466,7 @@ class AtlasRRTPlanner:
         start_time = time.time()
         while True:
             chart, ur = trees[i].sample()
-            xr = chart.psi(ur)
+            xr = chart.phi(ur)
             node_index_0 = trees[i].get_nearest_node(xr, chart)
             ni0 = trees[i].extend(xr, node_index_0, is_explore=True)
             xl0 = trees[i].nodes[ni0].x
