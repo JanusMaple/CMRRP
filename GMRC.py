@@ -800,7 +800,7 @@ class GMRC(EMRC):
         if self.module_geometries == {}:
             return
 
-        fig, ax = plt.subplots(figsize=(10, 10))
+        fig, ax = plt.subplots(figsize=(6, 6))
         ax.set_aspect('equal')
         ax.axis('off')
 

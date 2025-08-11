@@ -482,5 +482,8 @@ class AtlasRRTPlanner:
         path_1st_half = trees[i].get_path(ni0)
         path_2nd_half = trees[1 - i].get_path(ni1)
         path_2nd_half.reverse()
-        return path_1st_half + path_2nd_half
+        path = path_1st_half + path_2nd_half
+        if i == 1:
+            path.reverse()
+        return path
     

@@ -65,11 +65,11 @@ class CMMRC:
             
         return error
 
-    def is_rejecting(self, x: torch.tensor):
+    def collision_func(self, x: torch.tensor):
         in_boundary = (x >= -GMRC.mdl_ang_cap) & (x <= GMRC.mdl_ang_cap)
         if not in_boundary.any():
             return True
-        self.avatar.bend_angs = x.cpu().numpy()
+        self.avatar.bend_angs = x.detach().cpu().numpy()
         self.avatar.update_all_module_geometry()
         self.avatar.update_all_module_collider()
         return self.avatar.is_collision_detected()
