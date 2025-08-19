@@ -795,7 +795,7 @@ class GMRC(EMRC):
         self.show_topology()
         self.show_geometry()
 
-    def show_geometry(self):
+    def show_geometry(self, simple = False):
         
         if self.module_geometries == {}:
             return
@@ -804,10 +804,24 @@ class GMRC(EMRC):
         ax.set_aspect('equal')
         ax.axis('off')
 
+        leaf_count = self.w + self.v
+
         for i in range(self.m):
             g1n = f"H{self.module2gripper[0][i]}"
             mn = f"{i}"
             g2n = f"T{self.module2gripper[1][i]}"
+            h_node = None
+            t_node = None
+            if self.module2gripper[0][i] % 3 == 0:
+                h_node = self.module2gripper[0][i] // 3
+            elif self.module2gripper[0][i] < 0:
+                h_node = leaf_count
+                leaf_count = leaf_count + 1
+            if self.module2gripper[1][i] % 3 == 0:
+                t_node = self.module2gripper[1][i] // 3
+            elif self.module2gripper[1][i] < 0:
+                t_node = leaf_count
+                leaf_count = leaf_count + 1
             GMRC.draw_module(
                 ax, 
                 self.module_geometries[i][0], 
@@ -815,11 +829,14 @@ class GMRC(EMRC):
                 self.module_geometries[i][2], 
                 g1n, 
                 mn, 
-                g2n
+                g2n,
+                simple,
+                h_node,
+                t_node
             )
             for line in self.module_colliders[i][1].geoms:
                 x, y = line.xy
-                ax.plot(x, y, color = 'b')
+                ax.plot(x, y, color = 'dimgray')
 
     def print_all(self):
         print("-----------------------------------------------------------------")
@@ -975,18 +992,40 @@ class GMRC(EMRC):
     # Input parameters: 
     # axis, starting point, starting angle, arc radius
     # gripper 1 name, module name, gripper 2 name, number of points
-    def draw_module(ax, sp, sa, ba, g1n, mn, g2n):
+    # simple: Whether to plot simplified node
+    # h_node: If not None, the head gripper represented node
+    # t_node: If not None, the tail gripper represented node
+    def draw_module(ax, sp, sa, ba, g1n, mn, g2n, 
+                    simple = False, h_node = None, t_node = None):
         angs, xy = GMRC.get_mdl_seg_geo(sp, sa, ba)
-        ax.plot(xy[:, 0], xy[:, 1], '-k')
+        ax.plot(xy[:, 0], xy[:, 1], '-k', alpha=0.5)
 
         texts = [g1n, mn, g2n]
-        colors = ['red', 'blue', 'red']
+        colors = ['moccasin', 'paleturquoise', 'moccasin']
         for i in range(len(texts)):
+            if simple and i != 1:
+                continue
             seg_i = GMRC.text_place[i][0]
             seg_r = GMRC.text_place[i][1]
             x = xy[seg_i, 0] + np.cos(angs[seg_i]) * seg_r * GMRC.mdl_seg_lens[i]
             y = xy[seg_i, 1] + np.sin(angs[seg_i]) * seg_r * GMRC.mdl_seg_lens[i]
             ax.text(x, y, texts[i], 
+                    ha = 'center',
+                    va = 'center', 
+                    bbox=dict(boxstyle="round,pad=0.5", 
+                              facecolor=colors[i], 
+                              alpha=0.5))
+            
+        if simple and h_node is not None:
+            ax.text(xy[0, 0], xy[0, 1], f"{h_node}", 
+                    ha = 'center',
+                    va = 'center', 
+                    bbox=dict(boxstyle="round,pad=0.5", 
+                              facecolor=colors[i], 
+                              alpha=0.5))
+
+        if simple and t_node is not None:
+            ax.text(xy[-1, 0], xy[-1, 1], f"{t_node}", 
                     ha = 'center',
                     va = 'center', 
                     bbox=dict(boxstyle="round,pad=0.5", 
