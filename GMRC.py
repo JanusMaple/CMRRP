@@ -785,6 +785,58 @@ class GMRC(EMRC):
             self.grsp_angs[3 * grip_status[0] + 1] = 0
             self.grsp_angs[3 * grip_status[0] + 2] = 0
 
+    # Get set \Gamma_{final} for discretizing grasping angle choices
+    def get_Gamma_final(self):
+        Gamma_final = []        # List of np.floats: grasping angles (gammas)
+        participants = []       # List of tuples: (g1, g2) that g1 grasps g2
+        gamma_type = []         # List of tuple: (sign, index, is_w_grip)
+
+        for grip in range(self.w + self.v):
+            if self.is_grip_w[grip]:
+                Gamma_final.append(self.grsp_angs[3 * grip])
+                participants.append(
+                    (self.gripper2module[3 * grip + 1], 
+                     self.gripper2module[3 * grip]))
+                gamma_type.append((1, 0, True))
+                Gamma_final.append(-self.grsp_angs[3 * grip])
+                participants.append(
+                    (self.gripper2module[3 * grip], 
+                     self.gripper2module[3 * grip + 1]))
+                gamma_type.append((-1, 0, True))
+                Gamma_final.append(self.grsp_angs[3 * grip + 1])
+                participants.append(
+                    (self.gripper2module[3 * grip + 2], 
+                     self.gripper2module[3 * grip + 1]))
+                gamma_type.append((1, 1, True))
+                Gamma_final.append(-self.grsp_angs[3 * grip + 1])
+                participants.append(
+                    (self.gripper2module[3 * grip + 1], 
+                     self.gripper2module[3 * grip + 2]))
+                gamma_type.append((-1, 1, True))
+                Gamma_final.append(self.grsp_angs[3 * grip + 2])
+                participants.append(
+                    (self.gripper2module[3 * grip], 
+                     self.gripper2module[3 * grip + 2]))
+                gamma_type.append((1, 2, True))
+                Gamma_final.append(-self.grsp_angs[3 * grip + 2])
+                participants.append(
+                    (self.gripper2module[3 * grip + 2], 
+                     self.gripper2module[3 * grip]))
+                gamma_type.append((-1, 2, True))
+            else:
+                Gamma_final.append(self.grsp_angs[3 * grip])
+                participants.append(
+                    (self.gripper2module[3 * grip + 1], 
+                     self.gripper2module[3 * grip]))
+                gamma_type.append((1, 0, False))
+                Gamma_final.append(-self.grsp_angs[3 * grip])
+                participants.append(
+                    (self.gripper2module[3 * grip], 
+                     self.gripper2module[3 * grip + 1]))
+                gamma_type.append((-1, 0, False))
+
+        return Gamma_final, participants, gamma_type
+
     def print_all_angs(self):
         np.set_printoptions(precision=2, suppress=True, linewidth=1024)
         print(f"Bending angles are {self.bend_angs}")
