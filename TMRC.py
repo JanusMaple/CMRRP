@@ -611,10 +611,15 @@ class TMRC:
 
     def print_mdl_gpr_mapping(self):
         print(f"Module to grippers are: {self.module2gripper}")
-        print("Grippers belong to module: ", end='')
-        print([int(i // 2) for i in self.gripper2module])
-        print("Grippers' head-tail conditions are: ", end='')
-        print([int(i % 2) for i in self.gripper2module])
+        g2m = []
+        for i in self.gripper2module:
+            if i >= 0:
+                ht = "-Head" if int(i % 2) == 0 else "-Tail"
+                g2m.append(f"{int(i // 2)}" + ht)
+            else:
+                g2m.append("/")
+        print("Grippers are module: ", end='')
+        print(f"[{', '.join(g2m)}]")
 
     def print_all_cycles(self):
         print(f"Module Cycles are: {self.mdl_cycles}")
