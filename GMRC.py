@@ -545,18 +545,40 @@ class GMRC(EMRC):
             print("\033[91mAction Failed\033[0m: Failed to dock the new loop!")
             is_success = False
         return is_success
+    
+    # Try to modify the grasping angle of the outer gripper of a grip
+    # grip: the grip to be modified; ang: the angle target of the grapsing angle
+    def modify_grsp_ang(self, grip, ang):
+        if self.is_grip_w[grip]:
+            grip_status = (grip, 0)         # Pretend to grasp v-grip and form w-grip
+            gamma_0 = self.grsp_angs[3 * grip + 1]
+            ng = 3 * grip + 2
+        else:
+            grip_status = (grip, 1)         # Pretend to grasp leaf and form v-grip
+            gamma_0 = self.grsp_angs[3 * grip]
+            ng = 3 * grip_status[0] + 1
+        y0, _ = self.initialize_y(grip_status, gamma_0, mdf_mode=True)
+        y, _ = self.optim_angles_y_modify(y0, grip_status, ang)
+        self.bend_angs = y[0 : self.m]
+        self._update_grsp_angs_from_gamma(y[-1], grip_status)
+        self.update_all_module_geometry(ng)
+        self.update_all_module_collider()
 
     # Initialize y for optimize the docking of a grasping action
-    def initialize_y(self, grip_status, gamma):
+    # mdf_mode: Whether in modifying graping angle mode or in docking mode
+    def initialize_y(self, grip_status, gamma, mdf_mode = False):
         if grip_status[1] == 1:     # Created grip_status[0]
             gamma_range = (-GMRC.grsp_ang_cap, GMRC.grsp_ang_cap)
-            self.grsp_angs = np.append(self.grsp_angs, [0.0, 0.0, 0.0])
+            if not mdf_mode:
+                self.grsp_angs = np.append(self.grsp_angs, [0.0, 0.0, 0.0])
         else:                       # v -> w for grip_status[0]
             gamma1 = self.grsp_angs[3 * grip_status[0]]
             polarity = self.grip_polarities[grip_status[0]]
             gamma_range = self.get_gamma2_range(gamma1, polarity)
         
-        if gamma is not None and gamma > gamma_range[0] and gamma < gamma_range[1]:
+        if mdf_mode:                # No need to change gamma
+            is_optim_gamma = True
+        elif gamma is not None and gamma > gamma_range[0] and gamma < gamma_range[1]:
             self._update_grsp_angs_from_gamma(gamma, grip_status)
             is_optim_gamma = False
         else:
@@ -657,7 +679,6 @@ class GMRC(EMRC):
                 }
             ]
         try:
-            self.min_dock_err = 1e6
             result = minimize(
                 self.get_loop_error_obj_all_y,
                 y0,
@@ -678,6 +699,29 @@ class GMRC(EMRC):
                 'status': 0
             }
             return (result['x'], result['fun'])
+        
+    # Optimize y for modifying the grasping angle
+    def optim_angles_y_modify(self, y0, grip_status, gamma_target):
+        constraints = [{
+            'type': 'eq',
+            'fun': self.get_loop_error_con_mdf_y,
+            'args': (grip_status, )
+        },
+        {
+            'type': 'ineq',
+            'fun': self.get_module_collision_error_y,
+            'args': (True, grip_status)
+        }]
+        result = minimize(
+            self.get_gamma_modifying_error_y,
+            y0,
+            args=(gamma_target),
+            method = 'SLSQP',
+            constraints=constraints,
+            bounds=self.y_boundary,
+            options={'eps': 1e-6, 'disp': False}
+        )
+        return (result.x, result.fun)
 
     # Optimization callback function for storing gif of the action
     def optim_y_callback(self, y_k):
@@ -766,6 +810,27 @@ class GMRC(EMRC):
         if error <= GMRC.loop_ang_thd:                                      # Very Loose
             raise EarlyStop(y, error)
         return error
+    
+    # Get all loops error after modifying the grasping angle and bending angles
+    def get_loop_error_con_mdf_y(self, y, grip_status):                     # Constraint
+        loop_angle_error = 0
+        loop_dock_error = 0
+        self._update_grsp_angs_from_gamma(y[-1], grip_status)
+        for i in range(self.c):
+            betas = y[self.ba_yi_loops[i]] * self.bas_loops[i]
+            gammas = self.grsp_angs[self.ga_gi_loops[i]] * self.gas_loops[i]
+            ang_sum_tar = self.loop_polarities[i] * 2 * np.pi
+            loop_length = len(self.ba_yi_loops[i])
+            loop_angle_error = loop_angle_error + \
+                np.abs(np.sum(betas) + np.sum(gammas) - ang_sum_tar)
+            loop_dock_error = loop_dock_error + \
+                GMRC.get_single_loop_dock_error(betas, gammas, loop_length)
+        error = loop_angle_error + loop_dock_error
+        return error * 100.0
+
+    # Get the gamma error when modifying the grasping angle to approach a certain target
+    def get_gamma_modifying_error_y(self, y, gamma_target):
+        return np.abs(y[-1] - gamma_target)
 
     # Update self.grsp_angles from an angle gamma and grip_status
     def _update_grsp_angs_from_gamma(self, gamma, grip_status):
@@ -838,9 +903,16 @@ class GMRC(EMRC):
         return Gamma_final, participants, gamma_type
 
     def print_all_angs(self):
-        np.set_printoptions(precision=2, suppress=True, linewidth=1024)
-        print(f"Bending angles are {self.bend_angs}")
-        print(f"Grasping angles are {self.grsp_angs}")
+        bend_ang_str = "Bend Angles: ["
+        for ang in self.bend_angs:
+            bend_ang_str = bend_ang_str + f"{round(float(ang * 180 / np.pi))}° "
+        bend_ang_str = bend_ang_str + "]"
+        print(bend_ang_str)
+        grsp_ang_str = "Grasp Angles: ["
+        for ang in self.grsp_angs:
+            grsp_ang_str = grsp_ang_str + f"{round(float(ang * 180 / np.pi))}° "
+        grsp_ang_str = grsp_ang_str + "]"
+        print(grsp_ang_str)
 
     def show_all(self):
         self.print_all()
