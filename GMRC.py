@@ -562,11 +562,24 @@ class GMRC(EMRC):
             gamma_0 = self.grsp_angs[3 * grip]
             ng = 3 * grip_status[0] + 1
         y0, _ = self.initialize_y(grip_status, gamma_0, mdf_mode=True)
-        y, _ = self.optim_angles_y_modify(y0, grip_status, ang)
+        y, error = self.optim_angles_y_modify(y0, grip_status, ang)
         self.bend_angs = y[0 : self.m]
         self._update_grsp_angs_from_gamma(y[-1], grip_status)
         self.update_all_module_geometry(ng)
         self.update_all_module_collider()
+        if error > 1e-3 or self.is_collision_detected():
+            y, error = self.optim_angles_y_modify(y0, grip_status, ang, True)
+            self.bend_angs = y[0 : self.m]
+            self._update_grsp_angs_from_gamma(y[-1], grip_status)
+            self.update_all_module_geometry(ng)
+            self.update_all_module_collider()
+            if error > 1e-3 or self.is_collision_detected():
+                print("\033[91mAttempt Failed\033[0m: Failed to modify grasp angle!")
+                return False
+            else:
+                return True
+        else:
+            return True
 
     # Initialize y for optimize the docking of a grasping action
     # mdf_mode: Whether in modifying graping angle mode or in docking mode
@@ -705,7 +718,7 @@ class GMRC(EMRC):
             return (result['x'], result['fun'])
         
     # Optimize y for modifying the grasping angle
-    def optim_angles_y_modify(self, y0, grip_status, gamma_target):
+    def optim_angles_y_modify(self, y0, grip_status, gamma_target, accurate = False):
         constraints = [{
             'type': 'eq',
             'fun': self.get_loop_error_con_mdf_y,
@@ -716,16 +729,22 @@ class GMRC(EMRC):
             'fun': self.get_module_collision_error_y,
             'args': (True, grip_status)
         }]
+        if accurate:
+            method = 'trust-constr'
+        else:
+            method = 'SLSQP'
         result = minimize(
             self.get_gamma_modifying_error_y,
             y0,
             args=(gamma_target),
-            method = 'SLSQP',
+            method = method,
             constraints=constraints,
             bounds=self.y_boundary,
-            options={'eps': 1e-6, 'disp': False}
+            options={'disp': False}
         )
-        return (result.x, result.fun)
+        errors = self.get_loop_error_con_mdf_y(result.x, grip_status)
+        error = np.linalg.norm(errors)
+        return (result.x, error)
 
     # Optimization callback function for storing gif of the action
     def optim_y_callback(self, y_k):
