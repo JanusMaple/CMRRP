@@ -281,23 +281,27 @@ class GMRC(EMRC):
     
     # Get w-grip angle error (from 360 or 720 depending on the direction)
     def get_w_grip_angle_error_x(self, x):
-        error = 0.0
+        errors = np.zeros(len(self.xi_wf))
         for i in range(len(self.xi_wf)):
             j = self.xi_wf[i]
-            error = error + np.abs(x[j] + x[j + 1] + x[j + 2] - self.wgpa_obj[i])
-        return error
+            errors[i] = np.abs(x[j] + x[j + 1] + x[j + 2] - self.wgpa_obj[i])
+        return errors
 
     # Get loop-angle error for x
     def get_loop_angle_error_x(self, x, is_obj = False):
-        error = 0
+        errors = np.zeros(len(self.ba_xi_loops))
+        total_error = 0
         for i in range(len(self.ba_xi_loops)):
-            error = error + np.abs(
-                np.sum(x[self.ba_xi_loops[i]] * self.bas_loops[i])
+            errors[i] = (np.sum(x[self.ba_xi_loops[i]] * self.bas_loops[i])
                 + np.sum(x[self.ga_xi_loops[i]] * self.gas_loops[i])
                 - self.loop_polarities[i] * 2 * np.pi)
-        if is_obj and error <= 1e-5:
-            raise EarlyStop(x, error)
-        return error
+            total_error = total_error + errors[i]
+        if is_obj and total_error <= 1e-5:
+            raise EarlyStop(x, total_error)
+        if is_obj:
+            return total_error
+        else:
+            return errors
 
     # Get loop-dock error for x
     def get_loop_dock_error_x(self, x, is_obj = False):
@@ -813,20 +817,19 @@ class GMRC(EMRC):
     
     # Get all loops error after modifying the grasping angle and bending angles
     def get_loop_error_con_mdf_y(self, y, grip_status):                     # Constraint
-        loop_angle_error = 0
-        loop_dock_error = 0
+        errors = np.zeros(self.c * 3)
         self._update_grsp_angs_from_gamma(y[-1], grip_status)
         for i in range(self.c):
             betas = y[self.ba_yi_loops[i]] * self.bas_loops[i]
             gammas = self.grsp_angs[self.ga_gi_loops[i]] * self.gas_loops[i]
             ang_sum_tar = self.loop_polarities[i] * 2 * np.pi
             loop_length = len(self.ba_yi_loops[i])
-            loop_angle_error = loop_angle_error + \
-                np.abs(np.sum(betas) + np.sum(gammas) - ang_sum_tar)
-            loop_dock_error = loop_dock_error + \
-                GMRC.get_single_loop_dock_error(betas, gammas, loop_length)
-        error = loop_angle_error + loop_dock_error
-        return error * 100.0
+            dtheta = np.sum(betas) + np.sum(gammas) - ang_sum_tar
+            dx, dy = GMRC.get_single_loop_dock_error(betas, gammas, loop_length, True)
+            errors[3 * i] = dtheta
+            errors[3 * i + 1] = dx
+            errors[3 * i + 2] = dy
+        return np.array(errors)
 
     # Get the gamma error when modifying the grasping angle to approach a certain target
     def get_gamma_modifying_error_y(self, y, gamma_target):
@@ -981,7 +984,7 @@ class GMRC(EMRC):
 
     # Get loop-dock error for a single loop
     @staticmethod
-    def get_single_loop_dock_error(betas, gammas, l):
+    def get_single_loop_dock_error(betas, gammas, l, as_tuple = False):
         a = np.zeros((l, 1))
         b = np.zeros((l, 1))
         for j in range(GMRC.num_seg_lens):
@@ -997,6 +1000,8 @@ class GMRC(EMRC):
         delta_x = np.sum(a * np.cos(alphas) - b * np.sin(alphas))
         delta_y = np.sum(a * np.sin(alphas) + b * np.cos(alphas))
 
+        if as_tuple:
+            return delta_x, delta_y
         return np.sqrt(delta_x ** 2 + delta_y ** 2)
     
     # Get all module segment end points and module segment starting angles
