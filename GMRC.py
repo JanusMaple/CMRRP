@@ -769,7 +769,7 @@ class GMRC(EMRC):
             ng = 3 * grip_status[0] + 1
         self.update_all_module_geometry(ng)
         dd =  self.get_dangerous_distance()
-        dd_error = min(dd - GMRC.drs_dis_thd, GMRC.drs_dis_thd)
+        dd_error = min(dd - GMRC.drs_dis_thd, GMRC.drs_dis_thd) / GMRC.drs_dis_thd
         return dd_error
 
     # Get a formed loop error condiering both loop angle and loop dock for y
