@@ -37,11 +37,13 @@ class GMRC(EMRC):
     drs_dis_thd = 0.01          # Dangerous Distance Threshold
     loop_ang_thd = np.pi / 6    # Loop angle optimization phase I threshold
 
-    store_gif = False            # Whether to store a gif of action
+    store_gif = False           # Whether to store a gif of action
     store_gif_filename = 'grasping_action.gif'
 
     # place (i, r): r position of segment i
     text_place = [(0, 0.3), (2, 0.5), (4, 0.7)]
+
+    suppress_action_err = False # Whether to suppress execute_action error print
 
     def __init__(self, w, v, n, m, grippers, gripper2module, module2gripper, rng,
                  loop_polarities = None, 
@@ -546,7 +548,8 @@ class GMRC(EMRC):
         
         is_success = True
         if error > 1e-3 or self.is_collision_detected():
-            print("\033[91mAction Failed\033[0m: Failed to dock the new loop!")
+            if not GMRC.suppress_action_err:
+                print("\033[91mAction Failed\033[0m: Failed to dock the new loop!")
             is_success = False
         return is_success
     

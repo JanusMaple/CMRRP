@@ -7,6 +7,7 @@ import sys
 sys.path.append('..')
 sys.path.append('../GENN')
 import copy
+import numpy as np
 from GMRC import GMRC
 from GENN import GENN, DegreeEmbedding, SequentialPooling
 
@@ -61,7 +62,7 @@ class CGFManager:
             self.correspondence[
                 2 * (new_gf // 2) + 1 - new_gf % 2] = 2 * (gf // 2) + 1 - gf % 2
             self.num_corresponded = self.num_corresponded + 1
-        if self.correspondence[new_gt]:
+        if self.correspondence[new_gt] < 0:
             self.correspondence[new_gt] = gt
             self.correspondence[
                 2 * (new_gt // 2) + 1 - new_gt % 2] = 2 * (gt // 2) + 1 - gt % 2
@@ -138,7 +139,7 @@ class TreeNode:
             actions = self.gmrc.get_all_actions()
             for action in actions:
                 new_gmrc = self.gmrc.copy()
-                if action is not tuple:                         # Release
+                if not isinstance(action, tuple):               # Release
                     new_gmrc.execute_action(action)
                     new_node = TreeNode(new_gmrc, self.cgf_manager.copy(),
                                         self, self.g_depth, self.mediocrity, self.tree)
@@ -199,6 +200,8 @@ class TreeNode:
                 continue
             bc_gmrc = new_gmrc.copy()
             bc_gmrc.modify_grsp_ang(grip, ang)
+            if np.abs(bc_gmrc.get_grip_gamma(grip) - ang) > 1e-3:
+                continue
             bc_node = TreeNode(bc_gmrc, bc_cgf_manager, 
                                self, self.g_depth + 1, 0, self.tree)
             members.append(bc_node)
@@ -225,10 +228,11 @@ class Tree:
     def push_front(self):
         for node in self.nodes_at_depth[-1]:
             node.expand()
+        print(f"Find {len(self.nodes_at_depth[-1])} nodes at depth {len(self.nodes_at_depth) - 1}")
 
     def check_finish(self):
         for node in self.nodes_at_depth[-1]:
-            if node.cgf_manager.num_correspondence >= CGFManager.m:
+            if len(node.cgf_manager.survival_idx) == 0:
                 path = [node]
                 while node.parent is not None:
                     node = node.parent
@@ -245,6 +249,7 @@ class CMRRP:
         self.sequential_pooling = s
 
     def plan(self, gmrc_1: GMRC, gmrc_2: GMRC):
+        GMRC.suppress_action_err = True
         assert gmrc_1.m == gmrc_2.m
         CGFManager.m = gmrc_1.m
         cgf_manager = CGFManager(gmrc_2.get_Gamma_final())
