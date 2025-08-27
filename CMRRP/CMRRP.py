@@ -25,19 +25,23 @@ class CGFManager:
         else:
             self.correspondence = correspondence
 
-        # gf_ang_list[2 * i + ht] = (ang, idx, is_w)        # TODO: Really?
-        if gf_ang_list is None:
-            pass
+        # Lists storing the appropriate angle *if* gf is grasping gt
+        #   NOTE: Which means that the number of grips here is redundant
+        #         For example, 3H==30°==>6T and 6T==-30°==>3H both exist
+        if gf_ang_list is None:             # gf_ang_list[2 * i + ht] = (ang, gt)
+            gf_ang_list = [None] * (2 * CGFManager.m)
+            for gamma in self.Gamma_final:
+                pass
         else:
             self.gf_ang_list = gf_ang_list
-        if gt_ang_list is None:
-            pass
+        if gt_ang_list is None:             # gt_ang_list[2 * i + ht] = (ang, gf)
+            gt_ang_list = [None] * (2 * CGFManager.m)
         else:
             self.gt_ang_list = gt_ang_list
 
     # TODO: If gt's correspondence is not established and gt is on w-grip layer-2
     #       Then return None, indicating that should not allow choosing from Gamma_final
-    def get_angle(self, gf, gt):            # Get the angle that should be taken here
+    def get_Gamma_final_angle(self, gf, gt):    # Get the appropriate Gamma_final angle
         pass
 
     def copy(self):                         # Corresponding will not change ang_lists
@@ -78,12 +82,19 @@ class TreeNode:
         self.expanded = True
 
     # Get all reasonable children from the same grasping action based on eldest sibling
+    # NOTE: Will not have a->b with alpha and b->a with alpha
+    #       since will only have a->b from EMRC.get_all_actions()
     def _get_all_memebers_in_grasping_group(self, new_gmrc: GMRC, action: tuple):
-        # NOTE: Will not have a->b with alpha and b->a with alpha
-        #       since will only have a->b from EMRC.get_all_actions()
-        # TODO: Check whether the grasp angle of this action is definite
-        grip = new_gmrc.module2gripper[action[0] % 2][action[0] // 2] // 3
-        # TODO: Get all siblings then
+        optim_node = TreeNode(new_gmrc, self.cgf_manager.copy(),
+                              self, self.g_depth + 1)
+        members = [optim_node]
+        if len(new_gmrc.module_loops[-1]) <= 2:
+            return members
+        gf = action[0]
+        gt = action[1]
+        grip = new_gmrc.module2gripper[gf % 2][gf // 2] // 3
+        all_Gamma_final_angs = self.cgf_manager.get_Gamma_final_angle(gf, gt)
+        return members
 
 class CMRRP:
     def __init__(self, g: GENN, d: DegreeEmbedding, s: SequentialPooling):
