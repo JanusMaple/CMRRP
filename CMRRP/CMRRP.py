@@ -247,7 +247,7 @@ class CMRRP:
     def plan(self, gmrc_1: GMRC, gmrc_2: GMRC):
         assert gmrc_1.m == gmrc_2.m
         CGFManager.m = gmrc_1.m
-        cgf_manager = CGFManager(gmrc_2.get_Gamma_final()),
+        cgf_manager = CGFManager(gmrc_2.get_Gamma_final())
         tree = Tree(gmrc_1, cgf_manager)
         while True:
             tree.push_front()
