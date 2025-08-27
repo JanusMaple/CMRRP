@@ -60,10 +60,12 @@ class CGFManager:
             self.correspondence[new_gf] = gf
             self.correspondence[
                 2 * (new_gf // 2) + 1 - new_gf % 2] = 2 * (gf // 2) + 1 - gf % 2
+            self.num_corresponded = self.num_corresponded + 1
         if self.correspondence[new_gt]:
             self.correspondence[new_gt] = gt
             self.correspondence[
                 2 * (new_gt // 2) + 1 - new_gt % 2] = 2 * (gt // 2) + 1 - gt % 2
+            self.num_corresponded = self.num_corresponded + 1
         
         if not is_w_grip:
             self.survival_idx[index - bias_index : index - bias_index + 2] = []
@@ -115,33 +117,44 @@ class TreeNode:
 
     def __init__(self, gmrc: GMRC, cgf_manager: CGFManager, 
                  parent: TreeNode = None, g_depth: int = 0,
-                 mediocrity = 0):
+                 mediocrity: int = 0, tree: Tree = None):
         self.cgf_manager = cgf_manager
         self.gmrc: GMRC = gmrc
         self.parent: TreeNode = parent
         self.g_depth: int = g_depth
-        self.children: list = []
+        self.children: list[TreeNode] = []
         self.mediocrity: int = mediocrity
+        self.tree: Tree = tree
         self.expanded = False
+
+        self.tree.add_node_to_depth(self, self.g_depth)
         
-    def expand(self, tar_g_depth = None):
+    def expand_to(self, tar_g_depth = None):
         if tar_g_depth is not None:
             if self.g_depth >= tar_g_depth:
                 return
-        actions = self.gmrc.get_all_actions()
-        for action in actions:
-            new_gmrc = self.gmrc.copy()
-            if action is not tuple:                         # Release
-                new_gmrc.execute_action(action)
-                new_node = TreeNode(new_gmrc, self.cgf_manager.copy(),
-                                    self, self.g_depth, self.mediocrity)
-                self.children.append(new_node)
-            else:                                           # Grasp
-                if not new_gmrc.execute_action(action):
-                    continue
-                self.children.extend(
-                    self._get_all_memebers_in_grasping_group(new_gmrc, action))
+        
+        if not self.expanded:
+            actions = self.gmrc.get_all_actions()
+            for action in actions:
+                new_gmrc = self.gmrc.copy()
+                if action is not tuple:                         # Release
+                    new_gmrc.execute_action(action)
+                    new_node = TreeNode(new_gmrc, self.cgf_manager.copy(),
+                                        self, self.g_depth, self.mediocrity, self.tree)
+                    self.children.append(new_node)
+                else:                                           # Grasp
+                    if not new_gmrc.execute_action(action):
+                        continue
+                    self.children.extend(
+                        self._get_all_memebers_in_grasping_group(new_gmrc, action))
         self.expanded = True
+
+        for child in self.children:
+            child.expand_to(tar_g_depth)
+
+    def expand(self, extra_depth: int = 1):
+        return self.expand_to(self.g_depth + extra_depth)
 
     # Get all reasonable children from the same grasping action based on eldest sibling
     # NOTE: Will not have a->b with alpha and b->a with alpha
@@ -149,7 +162,7 @@ class TreeNode:
     def _get_all_memebers_in_grasping_group(self, new_gmrc: GMRC, action: tuple):
         if self.mediocrity < TreeNode.mediocrity_tolerance:
             optim_node = TreeNode(new_gmrc, self.cgf_manager.copy(),
-                                self, self.g_depth + 1, self.mediocrity + 1)
+                                self, self.g_depth + 1, self.mediocrity + 1, self.tree)
             members = [optim_node]
         else:
             members = []
@@ -165,7 +178,7 @@ class TreeNode:
         min_ang = min_gmrc.get_grip_gamma(grip)
         if min_ang < mid_ang and self.mediocrity < TreeNode.mediocrity_tolerance:
             min_node = TreeNode(min_gmrc, self.cgf_manager.copy(),
-                                self, self.g_depth + 1, self.mediocrity + 1)
+                                self, self.g_depth + 1, self.mediocrity + 1, self.tree)
             members.append(min_node)
 
         max_gmrc = new_gmrc.copy()
@@ -173,7 +186,7 @@ class TreeNode:
         max_ang = max_gmrc.get_grip_gamma(grip)
         if max_ang > mid_ang and self.mediocrity < TreeNode.mediocrity_tolerance:
             max_node = TreeNode(max_gmrc, self.cgf_manager.copy(),
-                                self, self.g_depth + 1, self.mediocrity + 1)
+                                self, self.g_depth + 1, self.mediocrity + 1, self.tree)
             members.append(max_node)
 
         is_w_grip = new_gmrc.is_grip_w[grip]
@@ -186,13 +199,47 @@ class TreeNode:
                 continue
             bc_gmrc = new_gmrc.copy()
             bc_gmrc.modify_grsp_ang(grip, ang)
-            bc_node = TreeNode(bc_gmrc, bc_cgf_manager, self, self.g_depth + 1, 0)
+            bc_node = TreeNode(bc_gmrc, bc_cgf_manager, 
+                               self, self.g_depth + 1, 0, self.tree)
             members.append(bc_node)
 
         return members
 
+class Tree:
+    def __init__(self, gmrc: GMRC, cgf_manager: CGFManager):
+        self.nodes_at_depth: list[TreeNode] = [[]]
+        self.max_g_depth = 0
+        self.root = TreeNode(gmrc,
+                        cgf_manager=cgf_manager,
+                        parent=None,
+                        g_depth=0,
+                        mediocrity=0,
+                        tree = self)
+
+    def add_node_to_depth(self, node: TreeNode, g_depth: int):
+        while g_depth > self.max_g_depth:
+            self.nodes_at_depth.append([])
+            self.max_g_depth = self.max_g_depth + 1
+        self.nodes_at_depth[g_depth].append(node)
+
+    def push_front(self):
+        for node in self.nodes_at_depth[-1]:
+            node.expand()
+
+    def check_finish(self):
+        for node in self.nodes_at_depth[-1]:
+            if node.cgf_manager.num_correspondence >= CGFManager.m:
+                path = [node]
+                while node.parent is not None:
+                    node = node.parent
+                    path.append(node)
+                return path
+        return None
+
 class CMRRP:
-    def __init__(self, g: GENN, d: DegreeEmbedding, s: SequentialPooling):
+    def __init__(self, g: GENN = None,
+                 d: DegreeEmbedding = None,
+                 s: SequentialPooling = None):
         self.genn = g
         self.degree_embedding = d
         self.sequential_pooling = s
@@ -200,7 +247,10 @@ class CMRRP:
     def plan(self, gmrc_1: GMRC, gmrc_2: GMRC):
         assert gmrc_1.m == gmrc_2.m
         CGFManager.m = gmrc_1.m
-        root = TreeNode(gmrc_1,
-                        cgf_manager=CGFManager(gmrc_2.get_Gamma_final()),
-                        parent=None,
-                        g_depth=0)
+        cgf_manager = CGFManager(gmrc_2.get_Gamma_final()),
+        tree = Tree(gmrc_1, cgf_manager)
+        while True:
+            tree.push_front()
+            path = tree.check_finish()
+            if path is not None:
+                return path
