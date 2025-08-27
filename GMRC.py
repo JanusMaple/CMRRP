@@ -637,6 +637,13 @@ class GMRC(EMRC):
             y0 = np.zeros(self.m)
             y0[:] = self.bend_angs
         return (y0, is_optim_gamma)
+    
+    # Get the out gripper grasping angle of a certain grip
+    def get_grip_gamma(self, grip):
+        if self.is_grip_w:
+            return self.grsp_angs[3 * grip + 1]
+        else:
+            return self.grsp_angs[3 * grip]
         
     # Optimize y for minimizing loop angle errors
     def optim_angles_y_ang(self, y0, is_optim_gamma = False, grip_status = None):
