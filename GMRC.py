@@ -552,7 +552,8 @@ class GMRC(EMRC):
     
     # Try to modify the grasping angle of the outer gripper of a grip
     # grip: the grip to be modified; ang: the angle target of the grapsing angle
-    def modify_grsp_ang(self, grip, ang):
+    # any_ang: whether is modifying any angle or new formed angle from grasping action
+    def modify_grsp_ang(self, grip, ang, any_ang = False):
         if self.is_grip_w[grip]:
             grip_status = (grip, 0)         # Pretend to grasp v-grip and form w-grip
             gamma_0 = self.grsp_angs[3 * grip + 1]
@@ -577,8 +578,14 @@ class GMRC(EMRC):
                 print("\033[91mAttempt Failed\033[0m: Failed to modify grasp angle!")
                 return False
             else:
+                if any_ang:
+                    self.update_all_module_geometry()
+                    self.update_all_module_collider()
                 return True
         else:
+            if any_ang:
+                self.update_all_module_geometry()
+                self.update_all_module_collider()
             return True
 
     # Initialize y for optimize the docking of a grasping action
