@@ -15,8 +15,8 @@ class CGFManager:
     m: int = 7                              # Number of modules in a configuration
 
     # The initialization methods should only be called for the root node, once
-    def __init__(self, Gamma_final: list, 
-                 survival_idx: list = None, correspondence: list = None, 
+    def __init__(self, Gamma_final: list, survival_idx: list = None, 
+                 correspondence: list = None, num_corresponded: int = 0,
                  gf_idx_list: list = None, gt_idx_list: list = None):
         self.Gamma_final = Gamma_final
         
@@ -31,6 +31,10 @@ class CGFManager:
         else:
             self.correspondence = correspondence
 
+        # Number of modules that have been corresponded
+        self.num_corresponded = num_corresponded
+
+        # Avaialble Gamma_final indexes for a gripper as gf or gt
         if gf_idx_list is None or gt_idx_list is None: 
             gf_idx_list = [[]] * (2 * CGFManager.m)
             gt_idx_list = [[]] * (2 * CGFManager.m)
@@ -52,12 +56,14 @@ class CGFManager:
         bias_index = gamma_final[3]
         is_w_grip = gamma_final[4]
 
-        self.correspondence[new_gf] = gf
-        self.correspondence[
-            2 * (new_gf // 2) + 1 - new_gf % 2] = 2 * (gf // 2) + 1 - gf % 2
-        self.correspondence[new_gt] = gt
-        self.correspondence[
-            2 * (new_gt // 2) + 1 - new_gt % 2] = 2 * (gt // 2) + 1 - gt % 2
+        if self.correspondence[new_gf] < 0:
+            self.correspondence[new_gf] = gf
+            self.correspondence[
+                2 * (new_gf // 2) + 1 - new_gf % 2] = 2 * (gf // 2) + 1 - gf % 2
+        if self.correspondence[new_gt]:
+            self.correspondence[new_gt] = gt
+            self.correspondence[
+                2 * (new_gt // 2) + 1 - new_gt % 2] = 2 * (gt // 2) + 1 - gt % 2
         
         if not is_w_grip:
             self.survival_idx[index - bias_index : index - bias_index + 2] = []
@@ -99,19 +105,23 @@ class CGFManager:
         return CGFManager(Gamma_final=self.Gamma_final,
                           survival_idx=copy.deepcopy(self.survival_idx),
                           correspondence=copy.deepcopy(self.correspondence),
+                          num_corresponded=self.num_corresponded,
                           gf_idx_list=copy.deepcopy(self.gf_idx_list),
                           gt_idx_list=copy.deepcopy(self.gt_idx_list))
 
 # A search tree node contains: 1. a unique gmrc shape; 2. a partial correspondence
 class TreeNode:
+    mediocrity_tolerance = 3
+
     def __init__(self, gmrc: GMRC, cgf_manager: CGFManager, 
-                 parent: TreeNode = None, g_depth: int = 0):
+                 parent: TreeNode = None, g_depth: int = 0,
+                 mediocrity = 0):
         self.cgf_manager = cgf_manager
         self.gmrc: GMRC = gmrc
         self.parent: TreeNode = parent
         self.g_depth: int = g_depth
         self.children: list = []
-        self.mediocrity: int = 0                            # TODO: Make this useful
+        self.mediocrity: int = mediocrity
         self.expanded = False
         
     def expand(self, tar_g_depth = None):
@@ -124,7 +134,7 @@ class TreeNode:
             if action is not tuple:                         # Release
                 new_gmrc.execute_action(action)
                 new_node = TreeNode(new_gmrc, self.cgf_manager.copy(),
-                                    self, self.g_depth)
+                                    self, self.g_depth, self.mediocrity)
                 self.children.append(new_node)
             else:                                           # Grasp
                 if not new_gmrc.execute_action(action):
@@ -137,9 +147,12 @@ class TreeNode:
     # NOTE: Will not have a->b with alpha and b->a with alpha
     #       since will only have a->b from EMRC.get_all_actions()
     def _get_all_memebers_in_grasping_group(self, new_gmrc: GMRC, action: tuple):
-        optim_node = TreeNode(new_gmrc, self.cgf_manager.copy(),
-                              self, self.g_depth + 1)
-        members = [optim_node]
+        if self.mediocrity < TreeNode.mediocrity_tolerance:
+            optim_node = TreeNode(new_gmrc, self.cgf_manager.copy(),
+                                self, self.g_depth + 1, self.mediocrity + 1)
+            members = [optim_node]
+        else:
+            members = []
         if len(new_gmrc.module_loops[-1]) <= 2:
             return members
         gf = action[0]
@@ -150,17 +163,17 @@ class TreeNode:
         min_gmrc = new_gmrc.copy()
         min_gmrc.modify_grsp_ang(grip, -GMRC.grsp_ang_cap)
         min_ang = min_gmrc.get_grip_gamma(grip)
-        if min_ang < mid_ang:
+        if min_ang < mid_ang and self.mediocrity < TreeNode.mediocrity_tolerance:
             min_node = TreeNode(min_gmrc, self.cgf_manager.copy(),
-                                self, self.g_depth + 1)
+                                self, self.g_depth + 1, self.mediocrity + 1)
             members.append(min_node)
 
         max_gmrc = new_gmrc.copy()
         max_gmrc.modify_grsp_ang(grip, GMRC.grsp_ang_cap)
         max_ang = max_gmrc.get_grip_gamma(grip)
-        if max_ang > mid_ang:
+        if max_ang > mid_ang and self.mediocrity < TreeNode.mediocrity_tolerance:
             max_node = TreeNode(max_gmrc, self.cgf_manager.copy(),
-                                self, self.g_depth + 1)
+                                self, self.g_depth + 1, self.mediocrity + 1)
             members.append(max_node)
 
         is_w_grip = new_gmrc.is_grip_w[grip]
@@ -172,7 +185,8 @@ class TreeNode:
             if ang <= min_ang and ang >= max_ang:
                 continue
             bc_gmrc = new_gmrc.copy()
-            bc_node = TreeNode(bc_gmrc, bc_cgf_manager, self, self.g_depth + 1)
+            bc_gmrc.modify_grsp_ang(grip, ang)
+            bc_node = TreeNode(bc_gmrc, bc_cgf_manager, self, self.g_depth + 1, 0)
             members.append(bc_node)
 
         return members
