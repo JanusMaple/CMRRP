@@ -18,6 +18,10 @@ warnings.filterwarnings(
     message=r"^delta_grad == 0\.0\. Check if the approximated function is linear",
     category=UserWarning,
 )
+warnings.filterwarnings(
+    "ignore",
+    message="Singular Jacobian matrix. Using SVD decomposition"
+)
 
 # The manager for correspondence and Gamma_final
 class CGFManager:
@@ -234,7 +238,8 @@ class TreeNode:
             if ang <= min_ang and ang >= max_ang:
                 continue
             bc_gmrc = new_gmrc.copy()
-            bc_gmrc.modify_grsp_ang(grip, ang)
+            if not bc_gmrc.modify_grsp_ang(grip, ang):
+                continue
             if np.abs(bc_gmrc.get_grip_gamma(grip) - ang) > 1e-3:
                 continue
             bc_node = TreeNode(bc_gmrc, bc_cgf_manager, 

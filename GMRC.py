@@ -43,7 +43,7 @@ class GMRC(EMRC):
     # place (i, r): r position of segment i
     text_place = [(0, 0.3), (2, 0.5), (4, 0.7)]
 
-    suppress_action_err = False # Whether to suppress execute_action error print
+    suppress_action_err = False # Whether to suppress grasp/modify error print
 
     def __init__(self, w, v, n, m, grippers, gripper2module, module2gripper, rng,
                  loop_polarities = None, 
@@ -578,7 +578,8 @@ class GMRC(EMRC):
             self.update_all_module_geometry(ng)
             self.update_all_module_collider()
             if error > 1e-3 or self.is_collision_detected():
-                print("\033[91mAttempt Failed\033[0m: Failed to modify grasp angle!")
+                if not GMRC.suppress_action_err:
+                    print("\033[91mAttempt Failed\033[0m: Failed to modify grasp angle!")
                 return False
             else:
                 if any_ang:
