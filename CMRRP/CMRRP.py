@@ -172,10 +172,13 @@ class TreeNode:
                         self._get_all_memebers_in_grasping_group(new_gmrc, action))
         self.expanded = True
 
+        self.children.reverse()
         for child in self.children:
             if child.is_goal():
                 return child
-            child.expand_to(tar_g_depth)
+            grand_child = child.expand_to(tar_g_depth)
+            if grand_child is not None:
+                return grand_child
 
         return None
 
