@@ -269,8 +269,8 @@ class Tree:
         max_g_depth_after = self.max_g_depth
         if max_g_depth_before == max_g_depth_after:
             raise RuntimeError("Can not further expand any leaf nodes!")
-        print(f"Find {len(self.nodes_at_depth[-1])} nodes at depth {\
-            len(self.nodes_at_depth) - 1}")
+        num_new_nodes = len(self.nodes_at_depth[-1])
+        print(f"Find {num_new_nodes} nodes at depth {len(self.nodes_at_depth) - 1}")
         return goal_node
 
 class CMRRP:
