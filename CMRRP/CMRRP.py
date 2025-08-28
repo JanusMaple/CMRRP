@@ -226,9 +226,15 @@ class Tree:
         self.nodes_at_depth[g_depth].append(node)
 
     def push_front(self):
+        max_g_depth_before = self.max_g_depth
         for node in self.nodes_at_depth[-1]:
             node.expand()
-        print(f"Find {len(self.nodes_at_depth[-1])} nodes at depth {len(self.nodes_at_depth) - 1}")
+        max_g_depth_after = self.max_g_depth
+        if max_g_depth_before == max_g_depth_after:
+            return False
+        print(f"Find {len(self.nodes_at_depth[-1])} nodes at depth {
+            len(self.nodes_at_depth) - 1}")
+        return True
 
     def check_finish(self):
         for node in self.nodes_at_depth[-1]:
@@ -255,7 +261,9 @@ class CMRRP:
         cgf_manager = CGFManager(gmrc_2.get_Gamma_final())
         tree = Tree(gmrc_1, cgf_manager)
         while True:
-            tree.push_front()
+            if not tree.push_front():
+                print("No leaf node to be expanded!")
+                break
             path = tree.check_finish()
             if path is not None:
                 return path

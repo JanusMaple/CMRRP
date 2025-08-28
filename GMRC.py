@@ -643,7 +643,7 @@ class GMRC(EMRC):
     
     # Get the out gripper grasping angle of a certain grip
     def get_grip_gamma(self, grip):
-        if self.is_grip_w:
+        if self.is_grip_w[grip]:
             return self.grsp_angs[3 * grip + 1]
         else:
             return self.grsp_angs[3 * grip]
