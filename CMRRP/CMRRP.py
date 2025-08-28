@@ -269,7 +269,7 @@ class Tree:
         max_g_depth_after = self.max_g_depth
         if max_g_depth_before == max_g_depth_after:
             raise RuntimeError("Can not further expand any leaf nodes!")
-        print(f"Find {len(self.nodes_at_depth[-1])} nodes at depth {
+        print(f"Find {len(self.nodes_at_depth[-1])} nodes at depth {\
             len(self.nodes_at_depth) - 1}")
         return goal_node
 
