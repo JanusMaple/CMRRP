@@ -7,9 +7,17 @@ import sys
 sys.path.append('..')
 sys.path.append('../GENN')
 import copy
+import warnings
 import numpy as np
 from GMRC import GMRC
 from GENN import GENN, DegreeEmbedding, SequentialPooling
+
+# Sometimes modifying grasping angle brings this complaint, just ignoring it here
+warnings.filterwarnings(
+    "ignore",
+    message=r"^delta_grad == 0\.0\. Check if the approximated function is linear",
+    category=UserWarning,
+)
 
 # The manager for correspondence and Gamma_final
 class CGFManager:
@@ -57,26 +65,39 @@ class CGFManager:
         bias_index = gamma_final[3]
         is_w_grip = gamma_final[4]
 
+        emt_new_gf = 2 * (new_gf // 2) + 1 - new_gf % 2
+        emt_gf = 2 * (gf // 2) + 1 - gf % 2
+        emt_new_gt = 2 * (new_gt // 2) + 1 - new_gt % 2
+        emt_gt = 2 * (gt // 2) + 1 - gt % 2
+
         if self.correspondence[new_gf] < 0:
             self.correspondence[new_gf] = gf
-            self.correspondence[
-                2 * (new_gf // 2) + 1 - new_gf % 2] = 2 * (gf // 2) + 1 - gf % 2
+            self.correspondence[emt_new_gf] = emt_gf
             self.num_corresponded = self.num_corresponded + 1
         if self.correspondence[new_gt] < 0:
             self.correspondence[new_gt] = gt
-            self.correspondence[
-                2 * (new_gt // 2) + 1 - new_gt % 2] = 2 * (gt // 2) + 1 - gt % 2
+            self.correspondence[emt_new_gt] = emt_gt
             self.num_corresponded = self.num_corresponded + 1
         
         if not is_w_grip:
-            self.survival_idx[index - bias_index : index - bias_index + 2] = []
+            new_survival_idx = []
+            for idx in self.survival_idx:
+                if not (idx >= index - bias_index and idx < index - bias_index + 2):
+                    new_survival_idx.append(idx)
+            self.survival_idx = new_survival_idx
             self.gf_idx_list[gf] = []
             self.gf_idx_list[gt] = []
             self.gt_idx_list[gt] = []
             self.gt_idx_list[gf] = []
         else:
             keep_idx = (index - bias_index) + (bias_index + 2) % 6
-            self.survival_idx[index - bias_index : index - bias_index + 6] = [keep_idx]
+            new_survival_idx = []
+            for idx in self.survival_idx:
+                if not (idx >= index - bias_index and idx < index - bias_index + 6):
+                    new_survival_idx.append(idx)
+                elif idx == keep_idx:
+                    new_survival_idx.append(idx)
+            self.survival_idx = new_survival_idx
             self.gf_idx_list[gf] = []           # gf can no longer grasp any gripper
             self.gf_idx_list[gt] = []           # gt can no longer grasp any gripper
             self.gt_idx_list[gt] = []           # gt can no longer be grasper
@@ -152,10 +173,21 @@ class TreeNode:
         self.expanded = True
 
         for child in self.children:
+            if child.is_goal():
+                return child
             child.expand_to(tar_g_depth)
+
+        return None
 
     def expand(self, extra_depth: int = 1):
         return self.expand_to(self.g_depth + extra_depth)
+    
+    # Whether this node is the goal configuration
+    def is_goal(self):
+        if len(self.cgf_manager.survival_idx) == 0:
+            return True
+        else:
+            return False
 
     # Get all reasonable children from the same grasping action based on eldest sibling
     # NOTE: Will not have a->b with alpha and b->a with alpha
@@ -205,6 +237,8 @@ class TreeNode:
             bc_node = TreeNode(bc_gmrc, bc_cgf_manager, 
                                self, self.g_depth + 1, 0, self.tree)
             members.append(bc_node)
+            if bc_node.is_goal():
+                break
 
         return members
 
@@ -226,25 +260,18 @@ class Tree:
         self.nodes_at_depth[g_depth].append(node)
 
     def push_front(self):
+        goal_node = None
         max_g_depth_before = self.max_g_depth
         for node in self.nodes_at_depth[-1]:
-            node.expand()
+            goal_node = node.expand()
+            if goal_node is not None:
+                break
         max_g_depth_after = self.max_g_depth
         if max_g_depth_before == max_g_depth_after:
-            return False
+            raise RuntimeError("Can not further expand any leaf nodes!")
         print(f"Find {len(self.nodes_at_depth[-1])} nodes at depth {
             len(self.nodes_at_depth) - 1}")
-        return True
-
-    def check_finish(self):
-        for node in self.nodes_at_depth[-1]:
-            if len(node.cgf_manager.survival_idx) == 0:
-                path = [node]
-                while node.parent is not None:
-                    node = node.parent
-                    path.append(node)
-                return path
-        return None
+        return goal_node
 
 class CMRRP:
     def __init__(self, g: GENN = None,
@@ -261,9 +288,11 @@ class CMRRP:
         cgf_manager = CGFManager(gmrc_2.get_Gamma_final())
         tree = Tree(gmrc_1, cgf_manager)
         while True:
-            if not tree.push_front():
-                print("No leaf node to be expanded!")
-                break
-            path = tree.check_finish()
-            if path is not None:
+            node = tree.push_front()
+            if node is not None:
+                path = [node]
+                while node.parent is not None:
+                    node = node.parent
+                    path.append(node)
+                path.reverse()
                 return path
