@@ -188,13 +188,34 @@ class TreeNode:
 
     def expand(self, extra_depth: int = 1):
         return self.expand_to(self.g_depth + extra_depth)
-    
-    # Whether this node is the goal configuration
+
+    # Whether this node contains all goal configuration angles
     def is_goal(self):
-        if len(self.cgf_manager.survival_idx) == 0:
-            return True
-        else:
+        if len(self.cgf_manager.survival_idx) > 0:
             return False
+        return True
+    
+    # Release grasps that does not appear in goal configuration
+    def extend_to_goal(self):
+        if self.gmrc.w == self.tree.target_gmrc.w:
+            if self.gmrc.v == self.tree.target_gmrc.v:
+                return self
+        for grip in range(self.gmrc.w + self.gmrc.v):
+            if self.gmrc.is_grip_w[grip]:
+                gripper = self.gmrc.gripper2module[3 * grip + 2]
+            else:
+                gripper = self.gmrc.gripper2module[3 * grip + 1]
+            gripper_t = self.cgf_manager.correspondence[gripper]
+            ht = gripper_t % 2
+            mdl = gripper_t // 2
+            if self.tree.target_gmrc.module2gripper[ht][mdl] < 0:
+                child_gmrc = self.gmrc.copy()
+                child_gmrc.execute_action(gripper)
+                child = TreeNode(child_gmrc, self.cgf_manager.copy(),
+                                 self, self.g_depth, 
+                                 self.mediocrity, self.tree)
+                break
+        return child.extend_to_goal()
 
     # Get all reasonable children from the same grasping action based on eldest sibling
     # NOTE: Will not have a->b with alpha and b->a with alpha
@@ -251,7 +272,7 @@ class TreeNode:
         return members
 
 class Tree:
-    def __init__(self, gmrc: GMRC, cgf_manager: CGFManager):
+    def __init__(self, gmrc: GMRC, cgf_manager: CGFManager, tar_gmrc: GMRC):
         self.nodes_at_depth: list[TreeNode] = [[]]
         self.max_g_depth = 0
         self.root = TreeNode(gmrc,
@@ -260,6 +281,7 @@ class Tree:
                         g_depth=0,
                         mediocrity=0,
                         tree = self)
+        self.target_gmrc = tar_gmrc
 
     def add_node_to_depth(self, node: TreeNode, g_depth: int):
         while g_depth > self.max_g_depth:
@@ -273,6 +295,7 @@ class Tree:
         for node in self.nodes_at_depth[-1]:
             goal_node = node.expand()
             if goal_node is not None:
+                goal_node = goal_node.extend_to_goal()
                 break
         max_g_depth_after = self.max_g_depth
         if max_g_depth_before == max_g_depth_after:
@@ -294,7 +317,7 @@ class CMRRP:
         assert gmrc_1.m == gmrc_2.m
         CGFManager.m = gmrc_1.m
         cgf_manager = CGFManager(gmrc_2.get_Gamma_final())
-        tree = Tree(gmrc_1, cgf_manager)
+        tree = Tree(gmrc_1, cgf_manager, gmrc_2)
         while True:
             node = tree.push_front()
             if node is not None:
