@@ -950,9 +950,8 @@ class GMRC(EMRC):
         x = torch.zeros(node_num, dtype=torch.long)
         edge_index = torch.zeros(2, edge_num * 2,       # Undirected edges
                                  dtype=torch.long)
-        edge_prop = torch.zeros(1, edge_num * 2,        # Edge property based on gamma
-                                dtype=torch.float)
         cyclic_neighbors = torch.zeros(node_num, 3, dtype=torch.long)
+        neighbor_phis = torch.zeros(node_num, 3, dtype=torch.float)
         neighbor_num = torch.zeros(node_num, dtype=torch.long)
         cur_edge = 0
         for i in range(node_num):
@@ -984,15 +983,16 @@ class GMRC(EMRC):
                 x[i] = 0                                # degree = 1
                 neighbors = [gripper2node[susp2gripper[-node2gripper[i] - 1]]]
                 phis = [2 * np.pi]                      # Default phi is 360°
-            for neighbor, phi in zip(neighbors, phis):
+            for neighbor in neighbors:
                 edge_index[0, cur_edge] = neighbor
                 edge_index[1, cur_edge] = i
-                edge_prop[cur_edge] = phi
                 cur_edge = cur_edge + 1
             cyclic_neighbor = torch.tensor(neighbors, dtype=torch.long)
+            neighbor_phi = torch.tensor(phis, dtype=torch.float)
             neighbor_num[i] = x[i] + 1
             cyclic_neighbors[i, 0 : neighbor_num[i]] = cyclic_neighbor
-        return x, edge_index, edge_prop, cyclic_neighbors, neighbor_num
+            neighbor_phis[i, 0 : neighbor_num[i]] = neighbor_phi
+        return x, edge_index, cyclic_neighbors, neighbor_phis, neighbor_num
 
     def print_all_angs(self):
         bend_ang_str = "Bend Angles: ["
