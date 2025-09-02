@@ -10,6 +10,7 @@ import matplotlib.pyplot as plt
 from PIL import Image
 import io
 import copy
+import torch
 from scipy.optimize import minimize
 class EarlyStop(Exception):
     def __init__(self, x, value):
@@ -931,6 +932,67 @@ class GMRC(EMRC):
                                    1, False))
 
         return Gamma_final
+    
+    # Get phi for a certain gripper participating in grip (otherwise is 360°)
+    def _get_phi(self, gripper):
+        grip = gripper // 3
+        if self.is_grip_w[grip] and self.grip_polarities[grip] == -1:
+            gripper_previous = grip * 3 + (gripper + 2) % 3
+            return np.pi - self.grsp_angs[gripper_previous]
+        else:
+            return np.pi + self.grsp_angs[gripper]
+    
+    # Get the representation of GMRC for GGNN as hash function
+    def get_representation(self, random_permutation = False):
+        node_num, edge_num, node2gripper, susp2gripper, gripper2node, susp2node = \
+            self._get_node_gripper_correspondence(random_permutation)
+        # Get x, edge_index and cyclic_neighbors for given node-gripper correspondance
+        x = torch.zeros(node_num, dtype=torch.long)
+        edge_index = torch.zeros(2, edge_num * 2,       # Undirected edges
+                                 dtype=torch.long)
+        edge_prop = torch.zeros(1, edge_num * 2,        # Edge property based on gamma
+                                dtype=torch.float)
+        cyclic_neighbors = torch.zeros(node_num, 3, dtype=torch.long)
+        neighbor_num = torch.zeros(node_num, dtype=torch.long)
+        cur_edge = 0
+        for i in range(node_num):
+            neighbors = []
+            phis = []
+            if node2gripper[i] >= 0:
+                if self.is_grip_w[node2gripper[i] // 3]:
+                    x[i] = 2                            # degree = 3
+                    for g in range(3):
+                        gripper = node2gripper[i] + g
+                        phis.append(self._get_phi(gripper))
+                        if self.grippers[gripper] >= 0:
+                            neighbors.append(gripper2node[self.grippers[gripper]])
+                        else:
+                            neighbors.append(susp2node[gripper])
+                    if self.grip_polarities[node2gripper[i] // 3] < 0:
+                        phis.reverse()
+                        neighbors.reverse()
+                else:
+                    x[i] = 1                            # degree = 2
+                    for g in range(2):
+                        gripper = node2gripper[i] + g
+                        phis.append(self._get_phi(gripper))
+                        if self.grippers[gripper] >= 0:
+                            neighbors.append(gripper2node[self.grippers[gripper]])
+                        else:
+                            neighbors.append(susp2node[gripper])
+            else:
+                x[i] = 0                                # degree = 1
+                neighbors = [gripper2node[susp2gripper[-node2gripper[i] - 1]]]
+                phis = [2 * np.pi]                      # Default phi is 360°
+            for neighbor, phi in zip(neighbors, phis):
+                edge_index[0, cur_edge] = neighbor
+                edge_index[1, cur_edge] = i
+                edge_prop[cur_edge] = phi
+                cur_edge = cur_edge + 1
+            cyclic_neighbor = torch.tensor(neighbors, dtype=torch.long)
+            neighbor_num[i] = x[i] + 1
+            cyclic_neighbors[i, 0 : neighbor_num[i]] = cyclic_neighbor
+        return x, edge_index, edge_prop, cyclic_neighbors, neighbor_num
 
     def print_all_angs(self):
         bend_ang_str = "Bend Angles: ["

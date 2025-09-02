@@ -27,7 +27,7 @@ class EMRC(TMRC):
         -1: -360 loop (clockwise) \n
 
     grip_polarities: [int, int, ..., int]; size is w + v
-        0: not in loop or is a v-grip \n
+        0: is a v-grip \n
         1: gripper_1 -> gripper_2 -> gripper_3 in counterclockwise direction \n
             such that gamma_1 + gamma_2 + 180 ∈ [-115, 115] degrees \n
         -1: # 1: gripper_1 -> gripper_2 -> gripper_3 in clockwise direction \n
@@ -450,12 +450,12 @@ class EMRC(TMRC):
 
         self.retro_action = None                        # No retro action after releasing
 
-    def get_representation(self, random_permutation = False):
+    def _get_node_gripper_correspondence(self, random_permutation = False):
         # NOTE: Use outer gripper to represent a grip as a graph node
         node_num = 2 * self.m - 2 * self.w - self.v     # Number of nodes
         edge_num = self.m                               # Number of edges
-        susp_num = node_num -self.w - self.v
-        # Assign each node a gripper (either outer gripper for grip or suspended sibling)
+        susp_num = node_num - self.w - self.v
+        # Assign each node a gripper (either inner gripper for grip or suspended sibling)
         node2gripper = [0] * node_num                   # Node to gripper/susp
         susp2gripper = [0] * susp_num                   # Susp to gripper
         node_index = 0
@@ -469,7 +469,7 @@ class EMRC(TMRC):
                 susp2gripper[susp_offset] = i           # Suspended gripper's sibling
                 susp_offset = susp_offset + 1
                 node_index = node_index + 1
-        # Randomly permuatate all node indexes if needed
+        # Randomly permutate all node indexes if needed
         if random_permutation:
             for i in range(node_num - 1):
                 j = self.rng.integers(i, node_num)
@@ -487,6 +487,12 @@ class EMRC(TMRC):
             else:
                 sibling_gripper = susp2gripper[-node2gripper[i] - 1]
                 susp2node[sibling_gripper] = i
+
+        return node_num, edge_num, node2gripper, susp2gripper, gripper2node, susp2node
+
+    def get_representation(self, random_permutation = False):
+        node_num, edge_num, node2gripper, susp2gripper, gripper2node, susp2node = \
+            self._get_node_gripper_correspondence(random_permutation)
         # Get x, edge_index and cyclic_neighbors for given node-gripper correspondance
         x = torch.zeros(node_num, dtype=torch.long)
         edge_index = torch.zeros(2, edge_num * 2,       # Undirected edges
@@ -519,8 +525,8 @@ class EMRC(TMRC):
                 x[i] = 0                                # degree = 1
                 neighbors = [gripper2node[susp2gripper[-node2gripper[i] - 1]]]
             for neighbor in neighbors:
-                edge_index[0, cur_edge] = i
-                edge_index[1, cur_edge] = neighbor
+                edge_index[0, cur_edge] = neighbor
+                edge_index[1, cur_edge] = i
                 cur_edge = cur_edge + 1
             cyclic_neighbor = torch.tensor(neighbors, dtype=torch.long)
             neighbor_num[i] = x[i] + 1
