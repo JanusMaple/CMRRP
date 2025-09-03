@@ -550,6 +550,8 @@ class GMRC(EMRC):
         is_success = True
         if error > 1e-3 or self.is_collision_detected():
             if not GMRC.suppress_action_err:
+                if self.modify_grsp_ang(grip_status[0], 0):
+                    return True
                 print("\033[91mAction Failed\033[0m: Failed to dock the new loop!")
             is_success = False
         return is_success
