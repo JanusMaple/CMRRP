@@ -168,10 +168,8 @@ class SequentialPooling(nn.Module):
         for i in range(len(node_count)):
             graph_feats.append(x[x_mean[j : j + node_count[i]].argsort() + j, :])
             j = j + node_count[i]
-        print(graph_feats)
         padded_feats = pad_sequence(graph_feats, batch_first=False)
         packed_feats = pack_padded_sequence(padded_feats, node_count.cpu(), 
                                             batch_first=False, enforce_sorted=False)
         _, h_n = self.seq_model(packed_feats)
-        print(h_n[-1])
         return self.mlp(h_n[-1])
