@@ -939,8 +939,12 @@ class GMRC(EMRC):
         if self.is_grip_w[grip] and self.grip_polarities[grip] == -1:
             gripper_previous = grip * 3 + (gripper + 2) % 3
             return np.pi - self.grsp_angs[gripper_previous]
-        else:
+        elif self.is_grip_w[grip]:
             return np.pi + self.grsp_angs[gripper]
+        elif gripper % 3 == 0:
+            return np.pi + self.grsp_angs[gripper]
+        else:                                   # gamma[gripper] = -gamma[gripper - 1]
+            return np.pi - self.grsp_angs[gripper - 1]
     
     # Get the representation of GMRC for GGNN as hash function
     def get_representation(self, random_permutation = False):
