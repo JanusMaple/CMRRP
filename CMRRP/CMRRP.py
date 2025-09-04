@@ -6,11 +6,15 @@ from __future__ import annotations
 import sys
 sys.path.append('..')
 sys.path.append('../GENN')
+sys.path.append('../GGNN')
 import copy
 import warnings
+import torch
+import torch.nn.functional as F
 import numpy as np
 from GMRC import GMRC
-from GENN import GENN, DegreeEmbedding, SequentialPooling
+from EMRC import EMRC
+import GENN, GGNN
 
 # Sometimes modifying grasping angle brings this complaint, just ignoring it here
 warnings.filterwarnings(
@@ -153,7 +157,24 @@ class TreeNode:
         self.tree: Tree = tree
         self.expanded = False
 
-        self.tree.add_node_to_depth(self, self.g_depth)
+        self.identifier = None
+
+        if self.tree.add_node_to_depth(self, self.g_depth):
+            self.is_novel = True            # A legal new node worth expanding
+        else:
+            self.is_novel = False           # A visited node not worth expanding
+
+    def get_identifier(self):
+        if self.identifier is None:
+            self.identifier = self.tree.id_verdict.get_identifier(self.gmrc)
+        return self.identifier
+
+    def get_ethinicity(self):
+        w = self.gmrc.w
+        v = self.gmrc.v
+        c = self.gmrc.c
+        nc = self.cgf_manager.num_corresponded
+        return (w, v, c, nc)
         
     def expand_to(self, tar_g_depth = None):
         if tar_g_depth is not None:
@@ -168,7 +189,8 @@ class TreeNode:
                     new_gmrc.execute_action(action)
                     new_node = TreeNode(new_gmrc, self.cgf_manager.copy(),
                                         self, self.g_depth, self.mediocrity, self.tree)
-                    self.children.append(new_node)
+                    if new_node.is_novel:
+                        self.children.append(new_node)
                 else:                                           # Grasp
                     if not new_gmrc.execute_action(action):
                         continue
@@ -265,15 +287,19 @@ class TreeNode:
                 continue
             bc_node = TreeNode(bc_gmrc, bc_cgf_manager, 
                                self, self.g_depth + 1, 0, self.tree)
-            members.append(bc_node)
+            if bc_node.is_novel:
+                members.append(bc_node)
             if bc_node.is_goal():
                 break
 
         return members
 
 class Tree:
-    def __init__(self, gmrc: GMRC, cgf_manager: CGFManager, tar_gmrc: GMRC):
+    def __init__(self, gmrc: GMRC, cgf_manager: CGFManager, tar_gmrc: GMRC,
+                 ed_estimator: EDEstimator, id_verdict: IDVerdict):
         self.nodes_at_depth: list[TreeNode] = [[]]
+        self.nodes_with_ethnicity: dict[tuple] = {}
+
         self.max_g_depth = 0
         self.root = TreeNode(gmrc,
                         cgf_manager=cgf_manager,
@@ -283,11 +309,26 @@ class Tree:
                         tree = self)
         self.target_gmrc = tar_gmrc
 
+        self.ed_estimator = ed_estimator
+        self.id_verdict = id_verdict
+
     def add_node_to_depth(self, node: TreeNode, g_depth: int):
+        ethinicity = node.get_ethinicity()
+        if not ethinicity in self.nodes_with_ethnicity:
+            self.nodes_with_ethnicity[ethinicity] = []
+        else:
+            id_1 = node.get_identifier()
+            for akin_node in self.nodes_with_ethnicity[ethinicity]:
+                id_2 = akin_node.get_identifier()
+                if self.id_verdict.is_identical(id_1, id_2):
+                    return False                                    # Prevent revisiting
+
         while g_depth > self.max_g_depth:
             self.nodes_at_depth.append([])
             self.max_g_depth = self.max_g_depth + 1
         self.nodes_at_depth[g_depth].append(node)
+        self.nodes_with_ethnicity[ethinicity].append(node)
+        return True
 
     def push_front(self):
         goal_node = None
@@ -304,20 +345,104 @@ class Tree:
         print(f"Find {num_new_nodes} nodes at depth {len(self.nodes_at_depth) - 1}")
         return goal_node
 
+# Edit Distance Estimator
+class EDEstimator:
+    def __init__(self,
+                 eg: GENN.GENN = None,
+                 ee: GENN.DegreeEmbedding = None,
+                 ep: GENN.SequentialPooling = None,
+                 device: torch.device = None):
+        self.genn = eg
+        self.genn_embedding = ee
+        self.genn_pooling = ep
+        self.device = device
+
+    def get_distance(self, gmrc_1: GMRC, gmrc_2: GMRC):
+        x_1, edge_index_1, cyclic_neighbors_1, neighbor_num_1 = \
+            EMRC.get_representation(gmrc_1)
+        x_2, edge_index_2, cyclic_neighbors_2, neighbor_num_2 = \
+            EMRC.get_representation(gmrc_2)
+        
+        x_oh_1 = F.one_hot(x_1, GENN.GENN.max_num_degree).float()
+        x_oh_2 = F.one_hot(x_2, GENN.GENN.max_num_degree).float()
+        
+        x_degree_feat_1 = self.genn_embedding(x_oh_1)
+        x_degree_feat_2 = self.genn_embedding(x_oh_2)
+
+        x_gnnout_feat_1 = self.genn(
+            x_degree_feat_1,
+            edge_index_1,
+            cyclic_neighbors_1,
+            neighbor_num_1)
+        x_gnnout_feat_2 = self.genn(
+            x_degree_feat_2, edge_index_2, cyclic_neighbors_2, neighbor_num_2)
+
+        graph_feat_1 = self.genn_pooling(x_gnnout_feat_1, torch.tensor([x_1.size()[0]]))
+        graph_feat_2 = self.genn_pooling(x_gnnout_feat_2, torch.tensor([x_2.size()[0]]))
+
+        graph_feat_diff = graph_feat_1 - graph_feat_2
+        distance = graph_feat_diff.norm(p=2, dim=-1)
+
+        return distance
+
+# Identity Verdict
+class IDVerdict:
+    thd = 1e-6
+
+    def __init__(self,
+                 gg: GGNN.GGNN = None,
+                 ge: GGNN.DegreeEmbedding = None,
+                 gp: GGNN.SequentialPooling = None,
+                 device: torch.device = None):
+        self.ggnn = gg
+        self.ggnn_embedding = ge
+        self.ggnn_pooling = gp
+        self.device = device
+
+    # Get the identifier (hash value) using GGNN
+    def get_identifier(self, gmrc):
+        x, edge_index, cyclic_neighbors, neighbor_phis, neighbor_num = \
+            gmrc.get_representation()
+        
+        x_oh = F.one_hot(x.to(self.device), GGNN.GGNN.max_num_degree).float()
+
+        x_degree_feat = self.ggnn_embedding(x_oh)
+
+        x_gnnout_feat = self.ggnn(
+            x_degree_feat,
+            edge_index.to(self.device),
+            cyclic_neighbors.to(self.device),
+            neighbor_phis.to(self.device),
+            neighbor_num.to(self.device))
+
+        graph_feat = self.ggnn_pooling(x_gnnout_feat, torch.tensor([x.size()[0]]))
+        return graph_feat
+
+    def is_identical(self, id_1: torch.tensor, id_2: torch.tensor):
+        graph_feat_diff = id_1 - id_2
+        distance = graph_feat_diff.norm(p=2, dim=-1)
+
+        return (distance < IDVerdict.thd)
+
 class CMRRP:
-    def __init__(self, g: GENN = None,
-                 d: DegreeEmbedding = None,
-                 s: SequentialPooling = None):
-        self.genn = g
-        self.degree_embedding = d
-        self.sequential_pooling = s
+    def __init__(self,
+                 gg: GGNN.GGNN = None,
+                 ge: GGNN.DegreeEmbedding = None,
+                 gp: GGNN.SequentialPooling = None,
+                 eg: GENN.GENN = None,
+                 ee: GENN.DegreeEmbedding = None,
+                 ep: GENN.SequentialPooling = None,
+                 device = None
+                 ):
+        self.ed_estimator = EDEstimator(eg, ee, ep, device)
+        self.id_verdict = IDVerdict(gg, ge, gp, device)
 
     def plan(self, gmrc_1: GMRC, gmrc_2: GMRC):
         GMRC.suppress_action_err = True
         assert gmrc_1.m == gmrc_2.m
         CGFManager.m = gmrc_1.m
         cgf_manager = CGFManager(gmrc_2.get_Gamma_final())
-        tree = Tree(gmrc_1, cgf_manager, gmrc_2)
+        tree = Tree(gmrc_1, cgf_manager, gmrc_2, self.ed_estimator, self.id_verdict)
         while True:
             node = tree.push_front()
             if node is not None:
