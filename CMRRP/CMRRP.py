@@ -246,7 +246,10 @@ class TreeNode:
         if self.mediocrity < TreeNode.mediocrity_tolerance:
             optim_node = TreeNode(new_gmrc, self.cgf_manager.copy(),
                                 self, self.g_depth + 1, self.mediocrity + 1, self.tree)
-            members = [optim_node]
+            if optim_node.is_novel:
+                members = [optim_node]
+            else:
+                members = []
         else:
             members = []
         if len(new_gmrc.module_loops[-1]) <= 2:
@@ -262,7 +265,8 @@ class TreeNode:
         if min_ang < mid_ang and self.mediocrity < TreeNode.mediocrity_tolerance:
             min_node = TreeNode(min_gmrc, self.cgf_manager.copy(),
                                 self, self.g_depth + 1, self.mediocrity + 1, self.tree)
-            members.append(min_node)
+            if min_node.is_novel:
+                members.append(min_node)
 
         max_gmrc = new_gmrc.copy()
         max_gmrc.modify_grsp_ang(grip, GMRC.grsp_ang_cap)
@@ -270,7 +274,8 @@ class TreeNode:
         if max_ang > mid_ang and self.mediocrity < TreeNode.mediocrity_tolerance:
             max_node = TreeNode(max_gmrc, self.cgf_manager.copy(),
                                 self, self.g_depth + 1, self.mediocrity + 1, self.tree)
-            members.append(max_node)
+            if max_node.is_novel:
+                members.append(max_node)
 
         is_w_grip = new_gmrc.is_grip_w[grip]
         all_Gamma_final_idxs = self.cgf_manager.get_angle_idxes(gf, gt, is_w_grip)
@@ -442,9 +447,9 @@ class CMRRP:
         assert gmrc_1.m == gmrc_2.m
         CGFManager.m = gmrc_1.m
         cgf_manager = CGFManager(gmrc_2.get_Gamma_final())
-        tree = Tree(gmrc_1, cgf_manager, gmrc_2, self.ed_estimator, self.id_verdict)
+        self.tree = Tree(gmrc_1, cgf_manager, gmrc_2, self.ed_estimator, self.id_verdict)
         while True:
-            node = tree.push_front()
+            node = self.tree.push_front()
             if node is not None:
                 path = [node]
                 while node.parent is not None:
