@@ -81,9 +81,9 @@ class GMRC(EMRC):
         self.successfully_spawned = True
 
         if bending_angles is None or grasping_angles is None:
-            is_planar, embedding = nx.check_planarity(self.G)   # Must be planar
+            is_planar, _ = nx.check_planarity(self.G)   # Must be planar
             cannot_be_docked = False
-            for try_collision_free in range(10):
+            for _ in range(10):
                 self.bend_angs, self.grsp_angs = self.get_random_angles_da()
                 if cannot_be_docked:
                     print('\033[91mFailed for Docking Loops :(\033[0m')
@@ -549,9 +549,12 @@ class GMRC(EMRC):
         
         is_success = True
         if error > 1e-3 or self.is_collision_detected():
+            if len(self.real_cycles[-1]) > 6:
+                if gamma is None:
+                    gamma = 0.0
+                if self.modify_grsp_ang(grip_status[0], gamma):
+                        return True
             if not GMRC.suppress_action_err:
-                if self.modify_grsp_ang(grip_status[0], 0):
-                    return True
                 print("\033[91mAction Failed\033[0m: Failed to dock the new loop!")
             is_success = False
         return is_success

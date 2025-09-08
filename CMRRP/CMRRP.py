@@ -51,10 +51,13 @@ class CGFManager:
         # Number of modules that have been corresponded
         self.num_corresponded = num_corresponded
 
+        # Whether a gripper can release (False if has participated in a grasp)
+        self.can_release = [True] * (2 * CGFManager.m)
+
         # Avaialble Gamma_final indexes for a gripper as gf or gt
         if gf_idx_list is None or gt_idx_list is None: 
-            gf_idx_list = [[]] * (2 * CGFManager.m)
-            gt_idx_list = [[]] * (2 * CGFManager.m)
+            gf_idx_list = [[] for _ in range(2 * CGFManager.m)]
+            gt_idx_list = [[] for _ in range(2 * CGFManager.m)]
             for i in self.survival_idx:
                 gamma_final = self.Gamma_final[i]
                 gf = gamma_final[1]
@@ -66,6 +69,9 @@ class CGFManager:
 
     # Collect an angle given Gamma_final index, and build correspondence based on it
     def get_angle(self, new_gf, new_gt, index):
+        self.can_release[new_gf] = False
+        self.can_release[new_gt] = False
+
         gamma_final = self.Gamma_final[index]
         angle = gamma_final[0]
         gf = gamma_final[1]
@@ -186,6 +192,8 @@ class TreeNode:
             for action in actions:
                 new_gmrc = self.gmrc.copy()
                 if not isinstance(action, tuple):               # Release
+                    if not self.cgf_manager.can_release[action]:
+                        continue
                     new_gmrc.execute_action(action)
                     new_node = TreeNode(new_gmrc, self.cgf_manager.copy(),
                                         self, self.g_depth, self.mediocrity, self.tree)
@@ -441,6 +449,7 @@ class CMRRP:
                  ):
         self.ed_estimator = EDEstimator(eg, ee, ep, device)
         self.id_verdict = IDVerdict(gg, ge, gp, device)
+        self.tree = None
 
     def plan(self, gmrc_1: GMRC, gmrc_2: GMRC):
         GMRC.suppress_action_err = True
