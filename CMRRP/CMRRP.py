@@ -34,7 +34,8 @@ class CGFManager:
     # The initialization methods should only be called for the root node, once
     def __init__(self, Gamma_final: list, survival_idx: list = None, 
                  correspondence: list = None, num_corresponded: int = 0,
-                 gf_idx_list: list = None, gt_idx_list: list = None):
+                 gf_idx_list: list = None, gt_idx_list: list = None, 
+                 can_release = None):
         self.Gamma_final = Gamma_final
         
         if survival_idx is None: 
@@ -52,7 +53,10 @@ class CGFManager:
         self.num_corresponded = num_corresponded
 
         # Whether a gripper can release (False if has participated in a grasp)
-        self.can_release = [True] * (2 * CGFManager.m)
+        if can_release is None:
+            self.can_release = [True] * (2 * CGFManager.m)
+        else:
+            self.can_release = can_release
 
         # Avaialble Gamma_final indexes for a gripper as gf or gt
         if gf_idx_list is None or gt_idx_list is None: 
@@ -145,7 +149,8 @@ class CGFManager:
                           correspondence=copy.deepcopy(self.correspondence),
                           num_corresponded=self.num_corresponded,
                           gf_idx_list=copy.deepcopy(self.gf_idx_list),
-                          gt_idx_list=copy.deepcopy(self.gt_idx_list))
+                          gt_idx_list=copy.deepcopy(self.gt_idx_list),
+                          can_release=copy.deepcopy(self.can_release))
 
 # A search tree node contains: 1. a unique gmrc shape; 2. a partial correspondence
 class TreeNode:
