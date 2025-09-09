@@ -156,8 +156,9 @@ class CGFManager:
     new_gi:     The inner gripper of the new formed w-grip if is forming a w-grip
     gamma_0:    The angle from new_gi to new_gt
     """
-    def get_ang_choices(self, new_gf, new_gt, is_w_grip, new_gi = None, gamma_0 = None):        
-        choices = self.get_angle_idxes(new_gf, new_gt, is_w_grip)
+    def get_ang_choices(self, new_gf, new_gt, is_w_grip, new_gi = None, gamma_0 = None):
+        choices = []
+        choices.extend(self.get_angle_idxes(new_gf, new_gt, is_w_grip))
         cursed_choices = {}                 # Choices that are 2-loop stepping-stone
 
         emt_new_gf = 2 * (new_gf // 2) + 1 - new_gf % 2
@@ -201,7 +202,7 @@ class CGFManager:
     """
     curse: list[tuple, tuple, ..., tuple(gf, gt, idx, locked_gripper)]
     """
-    def cursed_by(self, curse: tuple):
+    def cursed_by(self, curse: list):
         self.is_cursed = True
         self.curse = curse
         self.can_release[self.curse[0][3]] = False
@@ -399,7 +400,7 @@ class TreeNode:
                 if np.abs(ss_gmrc.get_grip_gamma(grip) - ang) > 1e-3:
                     continue
                 ss_node = TreeNode(ss_gmrc, ss_cgf_manager, 
-                                   self, self.g_depth + 1, self.mediocrity, self.tree)
+                                   self, self.g_depth + 1, 0, self.tree)
                 if ss_node.is_novel:
                     members.append(bc_node)
             else:                                       # Building some correspondence
