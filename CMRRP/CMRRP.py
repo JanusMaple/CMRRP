@@ -35,7 +35,7 @@ class CGFManager:
     def __init__(self, Gamma_final: list, survival_idx: list = None, 
                  correspondence: list = None, num_corresponded: int = 0,
                  gf_idx_list: list = None, gt_idx_list: list = None, 
-                 can_release = None):
+                 can_release = None, is_cursed = False, curse = None):
         self.Gamma_final = Gamma_final
         
         if survival_idx is None: 
@@ -57,6 +57,10 @@ class CGFManager:
             self.can_release = [True] * (2 * CGFManager.m)
         else:
             self.can_release = can_release
+
+        # Whether the current configuration is cursed and has to fulfill the curse
+        self.is_cursed = is_cursed
+        self.curse = curse
 
         # Avaialble Gamma_final indexes for a gripper as gf or gt
         if gf_idx_list is None or gt_idx_list is None: 
@@ -142,6 +146,70 @@ class CGFManager:
                 if self.Gamma_final[idx][2] == gt:
                     idx_list.append(idx)
             return idx_list
+        
+    # Get all non-trivial angle choices based on Gamma_final from target gmrc
+    #   Including angles directly leading to correspondence and angles as stepping-stone
+    """
+    new_gf:     The gripper that is grasping another gripper
+    new_gt:     The gripper that is going to be grasped by new_gf
+    is_w_grip:  Whether the new formed grip will be a w-grip
+    new_gi:     The inner gripper of the new formed w-grip if is forming a w-grip
+    gamma_0:    The angle from new_gi to new_gt
+    """
+    def get_ang_choices(self, new_gf, new_gt, is_w_grip, new_gi = None, gamma_0 = None):        
+        choices = self.get_angle_idxes(new_gf, new_gt, is_w_grip)
+        cursed_choices = {}                 # Choices that are 2-loop stepping-stone
+
+        emt_new_gf = 2 * (new_gf // 2) + 1 - new_gf % 2
+        emt_new_gt = 2 * (new_gt // 2) + 1 - new_gt % 2
+        idxes = self.get_angle_idxes(emt_new_gf, emt_new_gt, False)
+        for idx in idxes:
+            gamma = -self.Gamma_final[idx][0]
+            if not gamma in cursed_choices:
+                cursed_choices[gamma] = []
+            cursed_choices[gamma].append((emt_new_gf, emt_new_gt, idx, new_gf))
+        idxes = self.get_angle_idxes(emt_new_gt, emt_new_gf, False)
+        for idx in idxes:
+            gamma = self.Gamma_final[idx][0]
+            if not gamma in cursed_choices:
+                cursed_choices[gamma] = []
+            cursed_choices[gamma].append((emt_new_gt, emt_new_gf, idx, new_gf))
+        if is_w_grip:
+            emt_new_gi = 2 * (new_gi // 2) + 1 - new_gi % 2
+            idxes = self.get_angle_idxes(emt_new_gf, emt_new_gi, False)
+            for idx in idxes:
+                if self.Gamma_final[idx][0] < 0:
+                    gamma = -np.pi - gamma_0 - self.Gamma_final[idx][0]
+                else:
+                    gamma = np.pi - gamma_0 - self.Gamma_final[idx][0]
+                if not gamma in cursed_choices:
+                    cursed_choices[gamma] = []
+                cursed_choices[gamma].append((emt_new_gf, emt_new_gi, idx, new_gf))
+            idxes = self.get_angle_idxes(emt_new_gi, emt_new_gf, False)
+            for idx in idxes:
+                if self.Gamma_final[idx][0] < 0:
+                    gamma = np.pi - gamma_0 - (-self.Gamma_final[idx][0])
+                else:
+                    gamma = -np.pi - gamma_0 - (-self.Gamma_final[idx][0])
+                if not gamma in cursed_choices:
+                    cursed_choices[gamma] = []
+                cursed_choices[gamma].append((emt_new_gi, emt_new_gf, idx, new_gf))
+
+        choices.extend(list(cursed_choices.items()))
+        return choices
+    
+    """
+    curse: list[tuple, tuple, ..., tuple(gf, gt, idx, locked_gripper)]
+    """
+    def cursed_by(self, curse: tuple):
+        self.is_cursed = True
+        self.curse = curse
+        self.can_release[self.curse[0][3]] = False
+
+    def break_curse(self):
+        self.is_cursed = False
+        self.can_release[self.curse[0][3]] = True
+        self.curse = None
 
     def copy(self):                         # Corresponding will not change ang_lists
         return CGFManager(Gamma_final=self.Gamma_final,
@@ -150,7 +218,9 @@ class CGFManager:
                           num_corresponded=self.num_corresponded,
                           gf_idx_list=copy.deepcopy(self.gf_idx_list),
                           gt_idx_list=copy.deepcopy(self.gt_idx_list),
-                          can_release=copy.deepcopy(self.can_release))
+                          can_release=copy.deepcopy(self.can_release),
+                          is_cursed=self.is_cursed,
+                          curse=copy.deepcopy(self.curse))
 
 # A search tree node contains: 1. a unique gmrc shape; 2. a partial correspondence
 class TreeNode:
@@ -205,6 +275,23 @@ class TreeNode:
                     if new_node.is_novel:
                         self.children.append(new_node)
                 else:                                           # Grasp
+                    if self.cgf_manager.is_cursed:
+                        for curse_action in self.cgf_manager.curse:
+                            gf = curse_action[0]
+                            gt = curse_action[1]
+                            idx = curse_action[2]
+                            if not (gf == action[0] and gt == action[1]):
+                                continue
+                            if not new_gmrc.execute_action(action):
+                                continue
+                            new_cgf_manager = self.cgf_manager.copy()
+                            new_cgf_manager.break_curse()
+                            new_cgf_manager.get_angle(gf, gt, idx)
+                            new_node = TreeNode(new_gmrc, new_cgf_manager,
+                                        self, self.g_depth + 1, 0, self.tree)
+                            if new_node.is_novel:
+                                self.children.append(new_node)
+                        continue
                     if not new_gmrc.execute_action(action):
                         continue
                     self.children.extend(
@@ -291,24 +378,48 @@ class TreeNode:
                 members.append(max_node)
 
         is_w_grip = new_gmrc.is_grip_w[grip]
-        all_Gamma_final_idxs = self.cgf_manager.get_angle_idxes(gf, gt, is_w_grip)
-        for idx in all_Gamma_final_idxs:
-            # "bc" means building correspondence here
-            bc_cgf_manager = self.cgf_manager.copy()
-            ang = bc_cgf_manager.get_angle(gf, gt, idx)
-            if ang <= min_ang and ang >= max_ang:
-                continue
-            bc_gmrc = new_gmrc.copy()
-            if not bc_gmrc.modify_grsp_ang(grip, ang):
-                continue
-            if np.abs(bc_gmrc.get_grip_gamma(grip) - ang) > 1e-3:
-                continue
-            bc_node = TreeNode(bc_gmrc, bc_cgf_manager, 
-                               self, self.g_depth + 1, 0, self.tree)
-            if bc_node.is_novel:
-                members.append(bc_node)
-            if bc_node.is_goal():
-                break
+        if is_w_grip:
+            gi = new_gmrc.gripper2module[3 * grip]
+            gamma_0 = new_gmrc.grsp_angs[3 * grip]
+        else:
+            gi = None
+            gamma_0 = None
+        all_choices = self.cgf_manager.get_ang_choices(gf, gt, is_w_grip, gi, gamma_0)
+        for choice in all_choices:
+            if isinstance(choice, tuple):
+                # "ss" means stepping-stone here
+                ss_cgf_manager = self.cgf_manager.copy()
+                ss_cgf_manager.cursed_by(choice[1])
+                ang = choice[0]
+                if ang <= min_ang and ang >= max_ang:
+                    continue
+                ss_gmrc = new_gmrc.copy()
+                if not ss_gmrc.modify_grsp_ang(grip, ang):
+                    continue
+                if np.abs(ss_gmrc.get_grip_gamma(grip) - ang) > 1e-3:
+                    continue
+                ss_node = TreeNode(ss_gmrc, ss_cgf_manager, 
+                                   self, self.g_depth + 1, self.mediocrity, self.tree)
+                if ss_node.is_novel:
+                    members.append(bc_node)
+            else:                                       # Building some correspondence
+                idx = choice
+                # "bc" means building correspondence here
+                bc_cgf_manager = self.cgf_manager.copy()
+                ang = bc_cgf_manager.get_angle(gf, gt, idx)
+                if ang <= min_ang and ang >= max_ang:
+                    continue
+                bc_gmrc = new_gmrc.copy()
+                if not bc_gmrc.modify_grsp_ang(grip, ang):
+                    continue
+                if np.abs(bc_gmrc.get_grip_gamma(grip) - ang) > 1e-3:
+                    continue
+                bc_node = TreeNode(bc_gmrc, bc_cgf_manager, 
+                                self, self.g_depth + 1, 0, self.tree)
+                if bc_node.is_novel:
+                    members.append(bc_node)
+                if bc_node.is_goal():
+                    break
 
         return members
 
