@@ -95,7 +95,7 @@ class GMRC(EMRC):
                     break
                 if len(self.module_loops) > 0:              # If the graph is not acyclic
                     error = 1
-                    for try_docking_loops in range(3):
+                    for _ in range(3):
                         x0 = self.initialize_x()            # Initialize all variables
                         x0 = self.optim_angles_la_x(x0)
                         x = self.optim_angles_ld_x(x0)
@@ -521,7 +521,7 @@ class GMRC(EMRC):
         y0, is_optim_gamma = self.initialize_y(grip_status, gamma)
 
         if GMRC.store_gif:
-            fig, self.gif_ax = plt.subplots()
+            _, self.gif_ax = plt.subplots()
             self.gif_frames = []
 
         y = self.optim_angles_y_ang(y0, is_optim_gamma, grip_status)
