@@ -152,6 +152,8 @@ class Chart:
     Sample a point in the chart tangent space within the ball
     """
     def sample(self):
+        if self.k == 0:
+            return torch.zeros(0, device=self.device, requires_grad=True)
         z = torch.randn(self.k, device=self.device, requires_grad=True)
         r = Chart.rho_s * torch.rand(1, device=self.device).pow(1.0 / self.k)
         u = r * z / z.norm()

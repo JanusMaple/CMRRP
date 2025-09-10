@@ -525,7 +525,7 @@ class EDEstimator:
 
 # Identity Verdict
 class IDVerdict:
-    thd = 1e-6
+    thd = 1e-7
 
     def __init__(self,
                  gg: GGNN.GGNN = None,

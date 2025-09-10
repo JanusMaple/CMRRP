@@ -27,8 +27,8 @@ class CMMRC:
             self.device = device
         self.n = gmrc_1.m                           # Dimension of the space
         self.avatar = gmrc_1.copy()                 # Avatar GMRC for collision check
-        self.constraint_num = gmrc_1.c              # Number of constraints
-        self.ba_i_loops = [torch.tensor(module_loop, 
+        self.cyc_num = gmrc_1.c                     # Number of constraints
+        self.ba_cyc_loops = [torch.tensor(module_loop, 
                                         dtype=torch.long, 
                                         device=self.device) 
                            for module_loop in gmrc_1.module_loops]
@@ -39,29 +39,51 @@ class CMMRC:
         self.ang_sum_tars = torch.pi * 2 * \
             torch.tensor(gmrc_1.loop_polarities, device=self.device)
         self.gammas_list = []
-        for i in range(self.constraint_num):
+        for i in range(self.cyc_num):
             self.gammas_list.append(
                 torch.from_numpy(
                     gmrc_2.grsp_angs[gmrc_2.ga_gi_loops[i]] * gmrc_2.gas_loops[i]
                 ).to(self.device)
             )
+        
+        self.two_cyc_tars = [None] * self.cyc_num
+        self.is_2_cyc = [False] * self.cyc_num
+        self.constraint_num = 0
+        bend_angs = torch.tensor(gmrc_1.bend_angs, device=self.device)
+        for cyc in range(self.cyc_num):
+            if gmrc_1.is_2_cycle(cyc):
+                self.constraint_num = self.constraint_num + 2
+                self.is_2_cyc[cyc] = True
+                betas = bend_angs[self.ba_cyc_loops[cyc]] * self.bas_loops[cyc]
+                self.two_cyc_tars[cyc] = betas
+            else:
+                self.constraint_num = self.constraint_num + 3
 
     def constraint_func(self, x: torch.tensor):
-        error = torch.zeros(3 * self.constraint_num, 
+        error = torch.zeros(self.constraint_num, 
                             dtype=torch.float, 
                             device=self.device)
-        for i in range(self.constraint_num):
-            betas = x[self.ba_i_loops[i]] * self.bas_loops[i]
-            gammas = self.gammas_list[i]
-            ang_sum_tar = self.ang_sum_tars[i]
-            loop_length = len(self.ba_i_loops[i])
-            loop_angle_error = torch.abs(
-                torch.sum(betas) + torch.sum(gammas) - ang_sum_tar
-                )
-            dx, dy = self.get_single_loop_dock_error(betas, gammas, loop_length)
-            error[2 * i] = loop_angle_error
-            error[2 * i + 1] = dx
-            error[2 * i + 2] = dy
+        i = 0
+        cyc = 0
+        while i < self.constraint_num:
+            betas = x[self.ba_cyc_loops[cyc]] * self.bas_loops[cyc]
+            if self.is_2_cyc[cyc]:
+                error[i] = torch.abs(self.two_cyc_tars[cyc][0] - betas[0])
+                error[i + 1] = torch.abs(self.two_cyc_tars[cyc][1] - betas[1])
+                i = i + 2
+            else:
+                gammas = self.gammas_list[cyc]
+                ang_sum_tar = self.ang_sum_tars[cyc]
+                loop_length = len(self.ba_cyc_loops[cyc])
+                loop_angle_error = torch.abs(
+                    torch.sum(betas) + torch.sum(gammas) - ang_sum_tar
+                    )
+                dx, dy = self.get_single_loop_dock_error(betas, gammas, loop_length)
+                error[i] = loop_angle_error
+                error[i + 1] = dx
+                error[i + 2] = dy
+                i = i + 3
+            cyc = cyc + 1
             
         return error
 
