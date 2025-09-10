@@ -256,7 +256,12 @@ class TreeNode:
         v = self.gmrc.v
         c = self.gmrc.c
         nc = self.cgf_manager.num_corresponded
-        return (w, v, c, nc)
+        is_cursed = self.cgf_manager.is_cursed
+        if is_cursed:
+            ss_gripper = self.cgf_manager.curse[0][3]
+        else:
+            ss_gripper = None
+        return (w, v, c, nc, is_cursed, ss_gripper)
         
     def expand_to(self, tar_g_depth = None):
         if tar_g_depth is not None:
@@ -314,9 +319,10 @@ class TreeNode:
 
     # Whether this node contains all goal configuration angles
     def is_goal(self):
-        if len(self.cgf_manager.survival_idx) > 0:
-            return False
-        return True
+        if len(self.cgf_manager.survival_idx) <= 0:
+            return True
+        return self.tree.id_verdict.is_identical(
+            self.get_identifier(), self.tree.target_id)
     
     # Release grasps that does not appear in goal configuration
     def extend_to_goal(self):
@@ -402,7 +408,7 @@ class TreeNode:
                 ss_node = TreeNode(ss_gmrc, ss_cgf_manager, 
                                    self, self.g_depth + 1, 0, self.tree)
                 if ss_node.is_novel:
-                    members.append(bc_node)
+                    members.append(ss_node)
             else:                                       # Building some correspondence
                 idx = choice
                 # "bc" means building correspondence here
@@ -441,6 +447,8 @@ class Tree:
 
         self.ed_estimator = ed_estimator
         self.id_verdict = id_verdict
+
+        self.target_id = self.id_verdict.get_identifier(tar_gmrc)
 
     def add_node_to_depth(self, node: TreeNode, g_depth: int):
         ethinicity = node.get_ethinicity()
