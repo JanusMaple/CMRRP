@@ -549,7 +549,7 @@ class GMRC(EMRC):
         
         is_success = True
         if error > 1e-3 or self.is_collision_detected():
-            if len(self.real_cycles[-1]) > 6:
+            if not self.is_2_cycle(-1):
                 if gamma is None:
                     gamma = 0.0
                 if self.modify_grsp_ang(grip_status[0], gamma):

@@ -304,6 +304,13 @@ class TMRC:
             gns.append(int(self.grippers[g]))
         return gns
     
+    # Get that whether a cycle is a 2-cycle (cycle with only 2 modules) or not
+    def is_2_cycle(self, c_idx):
+        if len(self.real_cycles[c_idx]) <= 6:
+            return True
+        else:
+            return False
+    
     # Execute an action on topological level
     # Return: (cyc_status, grip_status)
     # cyc_status: [cyc_sts, cyc_sts, ..., cyc_sts]: list or cyc_idx: int
