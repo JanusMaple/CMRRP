@@ -512,8 +512,6 @@ class Tree:
         current_depth = 0
         print(f"\33[93mMediocrity Tolerance: {TreeNode.mediocrity_tolerance}\33[0m")
         while True:
-            num_nodes = len(self.nodes_at_depth[current_depth])
-            print(f"    Find {num_nodes} nodes at depth {current_depth}")
             for node in self.nodes_at_depth[current_depth]:
                 goal_node = node.expand()
                 if goal_node is not None:
@@ -522,6 +520,8 @@ class Tree:
                     num_nodes = len(self.nodes_at_depth[current_depth])
                     print(f"    Find {num_nodes} nodes at depth {current_depth}")
                     return goal_node
+            num_nodes = len(self.nodes_at_depth[current_depth])
+            print(f"    Find {num_nodes} nodes at depth {current_depth}")
             current_depth = current_depth + 1
             if current_depth >= len(self.nodes_at_depth):
                 TreeNode.mediocrity_tolerance = TreeNode.mediocrity_tolerance + 1
