@@ -757,18 +757,22 @@ class GMRC(EMRC):
             method = 'trust-constr'
         else:
             method = 'SLSQP'
-        result = minimize(
-            self.get_gamma_modifying_error_y,
-            y0,
-            args=(gamma_target),
-            method = method,
-            constraints=constraints,
-            bounds=self.y_boundary,
-            options={'disp': False}
-        )
-        errors = self.get_loop_error_con_mdf_y(result.x, grip_status)
+        try:
+            result = minimize(
+                self.get_gamma_modifying_error_y,
+                y0,
+                args=(gamma_target),
+                method = method,
+                constraints=constraints,
+                bounds=self.y_boundary,
+                options={'disp': False}
+            )
+            y = result.x
+        except ValueError as e:                     # Overconstraint
+            y = y0                                  # Cancel Optimization
+        errors = self.get_loop_error_con_mdf_y(y, grip_status)
         error = np.linalg.norm(errors)
-        return (result.x, error)
+        return (y, error)
 
     # Optimization callback function for storing gif of the action
     def optim_y_callback(self, y_k):
