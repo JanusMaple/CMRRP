@@ -248,9 +248,7 @@ class TreeNode:
 
     def get_identifier(self):
         if self.identifier is None:
-            ggnn_id = self.tree.id_verdict.get_identifier(self.gmrc)
-            grsp_id = np.sum(np.abs(self.gmrc.grsp_angs)) / np.pi * 180
-            self.identifier = (ggnn_id, grsp_id)
+            self.identifier = self.tree.id_verdict.get_identifier(self.gmrc)
         return self.identifier
 
     def get_ethinicity(self):
@@ -556,7 +554,10 @@ class IDVerdict:
             neighbor_num.to(self.device))
 
         graph_feat = self.ggnn_pooling(x_gnnout_feat, torch.tensor([x.size()[0]]))
-        return graph_feat
+
+        grsp_ang_parity = np.sum(np.abs(gmrc.grsp_angs)) / np.pi * 180
+
+        return (graph_feat, grsp_ang_parity)
 
     def is_identical(self, id_1: tuple, id_2: tuple):
         grsp_ang_diff = np.abs(id_1[1] - id_2[1])
