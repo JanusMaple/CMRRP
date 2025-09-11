@@ -225,7 +225,7 @@ class CGFManager:
 
 # A search tree node contains: 1. a unique gmrc shape; 2. a partial correspondence
 class TreeNode:
-    mediocrity_tolerance = 3
+    mediocrity_tolerance = 0
 
     def __init__(self, gmrc: GMRC, cgf_manager: CGFManager, 
                  parent: TreeNode = None, g_depth: int = 0,
@@ -234,7 +234,8 @@ class TreeNode:
         self.gmrc: GMRC = gmrc
         self.parent: TreeNode = parent
         self.g_depth: int = g_depth
-        self.children: list[TreeNode] = []
+        self.interesting_children: list[TreeNode] = []
+        self.mediocre_children: list[TreeNode] = []
         self.mediocrity: int = mediocrity
         self.tree: Tree = tree
         self.expanded = False
@@ -266,7 +267,10 @@ class TreeNode:
     def expand_to(self, tar_g_depth = None):
         if tar_g_depth is not None:
             if self.g_depth >= tar_g_depth:
-                return
+                return None
+            
+        if self.mediocrity > TreeNode.mediocrity_tolerance:
+            return None
         
         if not self.expanded:
             actions = self.gmrc.get_all_actions()
@@ -279,7 +283,7 @@ class TreeNode:
                     new_node = TreeNode(new_gmrc, self.cgf_manager.copy(),
                                         self, self.g_depth, self.mediocrity, self.tree)
                     if new_node.is_novel:
-                        self.children.append(new_node)
+                        self.interesting_children.append(new_node)
                 else:                                           # Grasp
                     if self.cgf_manager.is_cursed:
                         for curse_action in self.cgf_manager.curse:
@@ -296,16 +300,18 @@ class TreeNode:
                             new_node = TreeNode(new_gmrc, new_cgf_manager,
                                         self, self.g_depth + 1, 0, self.tree)
                             if new_node.is_novel:
-                                self.children.append(new_node)
+                                self.interesting_children.append(new_node)
                         continue
                     if not new_gmrc.execute_action(action):
                         continue
-                    self.children.extend(
-                        self._get_all_memebers_in_grasping_group(new_gmrc, action))
+                    ims, mms = self._get_all_memebers_in_grasping_group(
+                        new_gmrc, action)
+                    self.interesting_children.extend(ims)
+                    self.mediocre_children.extend(mms)
         self.expanded = True
 
-        self.children.reverse()
-        for child in self.children:
+        self.interesting_children.reverse()
+        for child in self.interesting_children:
             if child.is_goal():
                 return child
             grand_child = child.expand_to(tar_g_depth)
@@ -349,18 +355,28 @@ class TreeNode:
     # Get all reasonable children from the same grasping action based on eldest sibling
     # NOTE: Will not have a->b with alpha and b->a with alpha
     #       since will only have a->b from EMRC.get_all_actions()
+    """
+    Return (interesting_members: list[TreeNode], mediocre_members: list[TreeNode])
+        interesting_members:    mediority <= mediority_tolerance
+        mediocre_members:       mediority > mediority_tolerance
+    """
     def _get_all_memebers_in_grasping_group(self, new_gmrc: GMRC, action: tuple):
-        if self.mediocrity < TreeNode.mediocrity_tolerance:
-            optim_node = TreeNode(new_gmrc, self.cgf_manager.copy(),
-                                self, self.g_depth + 1, self.mediocrity + 1, self.tree)
-            if optim_node.is_novel:
-                members = [optim_node]
+        optim_node = TreeNode(new_gmrc, self.cgf_manager.copy(),
+                            self, self.g_depth + 1, self.mediocrity + 1, self.tree)
+        if optim_node.is_novel:
+            if self.mediocrity < TreeNode.mediocrity_tolerance:
+                interesting_members = [optim_node]
+                mediocre_members = []
             else:
-                members = []
+                interesting_members = []
+                mediocre_members = [optim_node]
         else:
-            members = []
-        if len(new_gmrc.module_loops[-1]) <= 2:
-            return members
+            interesting_members = []
+            mediocre_members = []
+
+        if new_gmrc.is_2_cycle(-1):
+            return (interesting_members, mediocre_members)
+        
         gf = action[0]
         gt = action[1]
         grip = new_gmrc.module2gripper[gf % 2][gf // 2] // 3
@@ -369,20 +385,26 @@ class TreeNode:
         min_gmrc = new_gmrc.copy()
         min_gmrc.modify_grsp_ang(grip, -GMRC.grsp_ang_cap)
         min_ang = min_gmrc.get_grip_gamma(grip)
-        if min_ang < mid_ang and self.mediocrity < TreeNode.mediocrity_tolerance:
+        if min_ang < mid_ang:
             min_node = TreeNode(min_gmrc, self.cgf_manager.copy(),
                                 self, self.g_depth + 1, self.mediocrity + 1, self.tree)
             if min_node.is_novel:
-                members.append(min_node)
+                if self.mediocrity < TreeNode.mediocrity_tolerance:
+                    interesting_members.append(min_node)
+                else:
+                    mediocre_members.append(min_node)
 
         max_gmrc = new_gmrc.copy()
         max_gmrc.modify_grsp_ang(grip, GMRC.grsp_ang_cap)
         max_ang = max_gmrc.get_grip_gamma(grip)
-        if max_ang > mid_ang and self.mediocrity < TreeNode.mediocrity_tolerance:
+        if max_ang > mid_ang:
             max_node = TreeNode(max_gmrc, self.cgf_manager.copy(),
                                 self, self.g_depth + 1, self.mediocrity + 1, self.tree)
             if max_node.is_novel:
-                members.append(max_node)
+                if self.mediocrity < TreeNode.mediocrity_tolerance:
+                    interesting_members.append(max_node)
+                else:
+                    mediocre_members.append(max_node)
 
         is_w_grip = new_gmrc.is_grip_w[grip]
         if is_w_grip:
@@ -408,7 +430,7 @@ class TreeNode:
                 ss_node = TreeNode(ss_gmrc, ss_cgf_manager, 
                                    self, self.g_depth + 1, 0, self.tree)
                 if ss_node.is_novel:
-                    members.append(ss_node)
+                    interesting_members.append(ss_node)
             else:                                       # Building some correspondence
                 idx = choice
                 # "bc" means building correspondence here
@@ -424,11 +446,11 @@ class TreeNode:
                 bc_node = TreeNode(bc_gmrc, bc_cgf_manager, 
                                 self, self.g_depth + 1, 0, self.tree)
                 if bc_node.is_novel:
-                    members.append(bc_node)
+                    interesting_members.append(bc_node)
                 if bc_node.is_goal():
                     break
 
-        return members
+        return (interesting_members, mediocre_members)
 
 class Tree:
     def __init__(self, gmrc: GMRC, cgf_manager: CGFManager, tar_gmrc: GMRC,
@@ -468,6 +490,7 @@ class Tree:
         self.nodes_with_ethnicity[ethinicity].append(node)
         return True
 
+    # Traditional BFS that pushs the front by 1 g-depth with fixed mediocrity tolerance
     def push_front(self):
         goal_node = None
         max_g_depth_before = self.max_g_depth
@@ -482,6 +505,29 @@ class Tree:
         num_new_nodes = len(self.nodes_at_depth[-1])
         print(f"Find {num_new_nodes} nodes at depth {len(self.nodes_at_depth) - 1}")
         return goal_node
+    
+    # Explore the configuration tree by gradually increasing mediocrity tolerance
+    def explore(self):
+        TreeNode.mediocrity_tolerance = 0
+        current_depth = 0
+        print(f"\33[93mMediocrity Tolerance: {TreeNode.mediocrity_tolerance}\33[0m")
+        while True:
+            num_nodes = len(self.nodes_at_depth[current_depth])
+            print(f"    Find {num_nodes} nodes at depth {current_depth}")
+            for node in self.nodes_at_depth[current_depth]:
+                goal_node = node.expand()
+                if goal_node is not None:
+                    goal_node = goal_node.extend_to_goal()
+                    current_depth = current_depth + 1
+                    num_nodes = len(self.nodes_at_depth[current_depth])
+                    print(f"    Find {num_nodes} nodes at depth {current_depth}")
+                    return goal_node
+            current_depth = current_depth + 1
+            if current_depth >= len(self.nodes_at_depth):
+                TreeNode.mediocrity_tolerance = TreeNode.mediocrity_tolerance + 1
+                current_depth = 0
+                cur_mt = TreeNode.mediocrity_tolerance
+                print(f"\33[93mMediocrity Tolerance: {cur_mt}\33[0m")
 
 # Edit Distance Estimator
 class EDEstimator:
@@ -585,18 +631,29 @@ class CMRRP:
         self.id_verdict = IDVerdict(gg, ge, gp, device)
         self.tree = None
 
-    def plan(self, gmrc_1: GMRC, gmrc_2: GMRC):
+    """
+    Methods:
+        BFS: Simple breadth first search with fixed mediocrity tolerance
+        DMT_BFS: BFS with dynamic mediocrity tolerance
+    """
+    def plan(self, gmrc_1: GMRC, gmrc_2: GMRC, method = "BFS"):
         GMRC.suppress_action_err = True
         assert gmrc_1.m == gmrc_2.m
         CGFManager.m = gmrc_1.m
         cgf_manager = CGFManager(gmrc_2.get_Gamma_final())
         self.tree = Tree(gmrc_1, cgf_manager, gmrc_2, self.ed_estimator, self.id_verdict)
-        while True:
-            node = self.tree.push_front()
-            if node is not None:
-                path = [node]
-                while node.parent is not None:
-                    node = node.parent
-                    path.append(node)
-                path.reverse()
-                return path
+
+        if method == "BFS":
+            while True:
+                node = self.tree.push_front()
+                if node is not None:
+                    break
+        elif method == "DMT_BFS":
+            node = self.tree.explore()
+
+        path = [node]
+        while node.parent is not None:
+            node = node.parent
+            path.append(node)
+        path.reverse()
+        return path
