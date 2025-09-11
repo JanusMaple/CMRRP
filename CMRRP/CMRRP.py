@@ -248,7 +248,9 @@ class TreeNode:
 
     def get_identifier(self):
         if self.identifier is None:
-            self.identifier = self.tree.id_verdict.get_identifier(self.gmrc)
+            ggnn_id = self.tree.id_verdict.get_identifier(self.gmrc)
+            grsp_id = np.sum(np.abs(self.gmrc.grsp_angs)) / np.pi * 180
+            self.identifier = (ggnn_id, grsp_id)
         return self.identifier
 
     def get_ethinicity(self):
@@ -556,11 +558,17 @@ class IDVerdict:
         graph_feat = self.ggnn_pooling(x_gnnout_feat, torch.tensor([x.size()[0]]))
         return graph_feat
 
-    def is_identical(self, id_1: torch.tensor, id_2: torch.tensor):
-        graph_feat_diff = id_1 - id_2
-        distance = graph_feat_diff.norm(p=2, dim=-1)
+    def is_identical(self, id_1: tuple, id_2: tuple):
+        grsp_ang_diff = np.abs(id_1[1] - id_2[1])
+        if grsp_ang_diff >= IDVerdict.thd:
+            return False
 
-        return (distance < IDVerdict.thd)
+        graph_feat_diff = id_1[0] - id_2[0]
+        distance = graph_feat_diff.norm(p=2, dim=-1)
+        if distance >= IDVerdict.thd:
+            return False        
+
+        return True
 
 class CMRRP:
     def __init__(self,
