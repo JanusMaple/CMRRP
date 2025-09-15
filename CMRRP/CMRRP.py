@@ -238,6 +238,8 @@ class TreeNode:
         self.mediocre_children: list[TreeNode] = []
         self.mediocrity: int = mediocrity
         self.tree: Tree = tree
+        self.actions = None
+        self.release_expanded = False
         self.expanded = False
 
         self.identifier = None
@@ -266,17 +268,24 @@ class TreeNode:
         
     def expand_to(self, tar_g_depth = None):
         if tar_g_depth is not None:
-            if self.g_depth >= tar_g_depth:
+            if self.g_depth > tar_g_depth:
                 return None
+            if self.g_depth == tar_g_depth:
+                release_only  = True
+            else:
+                release_only = False
             
         if self.mediocrity > TreeNode.mediocrity_tolerance:
             return None
         
         if not self.expanded:
-            actions = self.gmrc.get_all_actions()
-            for action in actions:
+            if self.actions is None:
+                self.actions = self.gmrc.get_all_actions()
+            for action in self.actions:
                 new_gmrc = self.gmrc.copy()
                 if not isinstance(action, tuple):               # Release
+                    if self.release_expanded:
+                        continue
                     if not self.cgf_manager.can_release[action]:
                         continue
                     new_gmrc.execute_action(action)
@@ -285,6 +294,8 @@ class TreeNode:
                     if new_node.is_novel:
                         self.interesting_children.append(new_node)
                 else:                                           # Grasp
+                    if release_only:
+                        continue
                     if self.cgf_manager.is_cursed:
                         for curse_action in self.cgf_manager.curse:
                             gf = curse_action[0]
@@ -308,7 +319,10 @@ class TreeNode:
                         new_gmrc, action)
                     self.interesting_children.extend(ims)
                     self.mediocre_children.extend(mms)
-        self.expanded = True
+        
+        self.release_expanded = True
+        if not release_only:
+            self.expanded = True
 
         self.interesting_children.reverse()
         for child in self.interesting_children:
