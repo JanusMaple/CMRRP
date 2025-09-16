@@ -394,14 +394,16 @@ class TreeNode:
         mid_ang = new_gmrc.get_grip_gamma(grip)
 
         if new_gmrc.is_2_cycle(-1):
-            all_idxes = self.cgf_manager.get_angle_idxes(gf, gt, is_w_grip)
-            for idx in all_idxes:
-                new_cgf_manager = self.cgf_manager.copy()
-                ang = new_cgf_manager.get_angle(gf, gt, idx)
-                if np.abs(ang - mid_ang) < 0.1 / 180 * np.pi:
-                    new_node = TreeNode(new_gmrc.copy(), new_cgf_manager,
-                                        self, self.g_depth + 1, 0, self.tree)
-                    interesting_members.append(new_node)
+            if optim_node.is_novel:
+                all_idxes = self.cgf_manager.get_angle_idxes(gf, gt, is_w_grip)
+                for idx in all_idxes:
+                    new_cgf_manager = self.cgf_manager.copy()
+                    ang = new_cgf_manager.get_angle(gf, gt, idx)
+                    if np.abs(ang - mid_ang) < 0.001 / 180 * np.pi:
+                        optim_node.mediocrity = 0
+                        optim_node.cgf_manager.get_angle(gf, gt, idx)
+                        interesting_members.append(optim_node)
+                        mediocre_members = []
             return (interesting_members, mediocre_members)
 
         min_gmrc = new_gmrc.copy()
