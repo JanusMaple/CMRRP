@@ -112,7 +112,14 @@ class CGFManager:
             self.gt_idx_list[gt] = []
             self.gt_idx_list[gf] = []
         else:
-            keep_idx = (index - bias_index) + (bias_index + 2) % 6
+            # For w-grip in Gamma_final:
+            #   [..., gamma_1, -gamma_1, gamma_2, -gamma_2, gamma_3, -gamma_3, ...]
+            if bias_index // 2 == 0:
+                # gamma_1 => gamma_2; gamma_2 => gamma_3; gamma_3 => gamma_1
+                keep_idx = (index - bias_index) + (bias_index + 2) % 6
+            else:
+                # -gamma_1 => -gamma_3; -gamma_2 => -gamma_1; -gamma_3 => -gamma_2
+                keep_idx = (index - bias_index) + (bias_index + 4) % 6
             new_survival_idx = []
             for idx in self.survival_idx:
                 if not (idx >= index - bias_index and idx < index - bias_index + 6):
