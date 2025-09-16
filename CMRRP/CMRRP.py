@@ -258,7 +258,7 @@ class TreeNode:
 
         self.id_ethnicity = None            # Tuple of node id and ethnicity
 
-        self.is_novel = self.tree.add_node_to_depth(self, self.cgf_manager.is_cursed)
+        self.is_novel = self.tree.add_node_to_depth(self)
 
     # Get both node identifier and its ethnicity (based on grsp_ang parity)
     def get_id_ethnicity(self):
@@ -341,9 +341,7 @@ class TreeNode:
     def is_goal(self):
         if len(self.cgf_manager.survival_idx) <= 0:
             return True
-        self_id, _ = self.get_id_ethnicity()
-        return self.tree.id_verdict.is_identical(
-            self_id, self.tree.target_id)
+        return False
     
     # Release grasps that does not appear in goal configuration
     def extend_to_goal(self):
@@ -388,14 +386,23 @@ class TreeNode:
         else:
             interesting_members = []
             mediocre_members = []
-
-        if new_gmrc.is_2_cycle(-1):
-            return (interesting_members, mediocre_members)
         
         gf = action[0]
         gt = action[1]
         grip = new_gmrc.module2gripper[gf % 2][gf // 2] // 3
+        is_w_grip = new_gmrc.is_grip_w[grip]
         mid_ang = new_gmrc.get_grip_gamma(grip)
+
+        if new_gmrc.is_2_cycle(-1):
+            all_idxes = self.cgf_manager.get_angle_idxes(gf, gt, is_w_grip)
+            for idx in all_idxes:
+                new_cgf_manager = self.cgf_manager.copy()
+                ang = new_cgf_manager.get_angle(gf, gt, idx)
+                if np.abs(ang - mid_ang) < 0.1 / 180 * np.pi:
+                    new_node = TreeNode(new_gmrc.copy(), new_cgf_manager,
+                                        self, self.g_depth + 1, 0, self.tree)
+                    interesting_members.append(new_node)
+            return (interesting_members, mediocre_members)
 
         min_gmrc = new_gmrc.copy()
         min_gmrc.modify_grsp_ang(grip, -GMRC.grsp_ang_cap)
@@ -421,7 +428,6 @@ class TreeNode:
                 else:
                     mediocre_members.append(max_node)
 
-        is_w_grip = new_gmrc.is_grip_w[grip]
         if is_w_grip:
             gi = new_gmrc.gripper2module[3 * grip]
             gamma_0 = new_gmrc.grsp_angs[3 * grip]
@@ -488,8 +494,8 @@ class Tree:
 
         self.target_id, _ = self.id_verdict.get_id_ethnicity(tar_gmrc)
 
-    def add_node_to_depth(self, node: TreeNode, force_add = False):
-        if not force_add:
+    def add_node_to_depth(self, node: TreeNode):
+        if not node.cgf_manager.is_cursed:
             node_id, ethnicity = node.get_id_ethnicity()
             if not ethnicity in self.ethinicity2id:
                 self.ethinicity2id[ethnicity] = [node_id]
