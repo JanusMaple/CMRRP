@@ -462,6 +462,10 @@ class TreeNode:
                 if ang <= min_ang and ang >= max_ang:
                     continue
                 bc_gmrc = new_gmrc.copy()
+                bc_gmrc.modify_ang_forcibly(ang, grip)
+                if self.tree.is_duplicated_gmrc(bc_gmrc):
+                    continue
+                bc_gmrc.restore_grsp_ang()
                 if not bc_gmrc.modify_grsp_ang(grip, ang):
                     continue
                 if np.abs(bc_gmrc.get_grip_gamma(grip) - ang) > 1e-3:
@@ -495,6 +499,16 @@ class Tree:
                         tree = self)
 
         self.target_id, _ = self.id_verdict.get_id_ethnicity(tar_gmrc)
+
+    # Decide whether a GMRC shape has been reached by the tree or not
+    def is_duplicated_gmrc(self, gmrc: GMRC):
+        gmrc_id, ethnicity = self.id_verdict.get_id_ethnicity(gmrc)
+        if not ethnicity in self.ethinicity2id:
+            return False
+        for id in self.ethinicity2id[ethnicity]:
+            if self.id_verdict.is_identical(id, gmrc_id):
+                return True
+        return False
 
     def add_node_to_depth(self, node: TreeNode):
         if not node.cgf_manager.is_cursed:

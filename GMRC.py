@@ -599,7 +599,7 @@ class GMRC(EMRC):
             return True
 
     # Initialize y for optimize the docking of a grasping action
-    # mdf_mode: Whether in modifying graping angle mode or in docking mode
+    # mdf_mode: Whether in modifying grasping angle mode or in docking mode
     def initialize_y(self, grip_status, gamma, mdf_mode = False):
         if grip_status[1] == 1:     # Created grip_status[0]
             gamma_range = (-GMRC.grsp_ang_cap, GMRC.grsp_ang_cap)
@@ -881,6 +881,23 @@ class GMRC(EMRC):
     # Get the gamma error when modifying the grasping angle to approach a certain target
     def get_gamma_modifying_error_y(self, y, gamma_target):
         return np.abs(y[-1] - gamma_target)
+    
+    # Temporarily modifying grsp_angs by directly modifying it
+    def modify_ang_forcibly(self, gamma, grip):
+        if self.is_grip_w[grip]:
+            grip_status = (grip, 0)         # Pretend to grasp v-grip and form w-grip
+            self.true_gamma_in_grip = (self.grsp_angs[3 * grip + 1], grip_status)
+        else:
+            grip_status = (grip, 1)         # Pretend to grasp leaf and form v-grip
+            self.true_gamma_in_grip = (self.grsp_angs[3 * grip], grip_status)
+        self._update_grsp_angs_from_gamma(gamma, grip_status)
+
+    # Restore temporarily modified angle by modify_ang_forcibly()
+    def restore_grsp_ang(self):
+        self._update_grsp_angs_from_gamma(
+            self.true_gamma_in_grip[0],
+            self.true_gamma_in_grip[1]
+        )
 
     # Update self.grsp_angles from an angle gamma and grip_status
     def _update_grsp_angs_from_gamma(self, gamma, grip_status):
