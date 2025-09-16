@@ -114,7 +114,7 @@ class CGFManager:
         else:
             # For w-grip in Gamma_final:
             #   [..., gamma_1, -gamma_1, gamma_2, -gamma_2, gamma_3, -gamma_3, ...]
-            if bias_index // 2 == 0:
+            if bias_index % 2 == 0:
                 # gamma_1 => gamma_2; gamma_2 => gamma_3; gamma_3 => gamma_1
                 keep_idx = (index - bias_index) + (bias_index + 2) % 6
             else:
@@ -237,41 +237,34 @@ class TreeNode:
     def __init__(self, gmrc: GMRC, cgf_manager: CGFManager, 
                  parent: TreeNode = None, g_depth: int = 0,
                  mediocrity: int = 0, tree: Tree = None):
-        self.cgf_manager = cgf_manager
-        self.gmrc: GMRC = gmrc
-        self.parent: TreeNode = parent
-        self.g_depth: int = g_depth
+        self.cgf_manager = cgf_manager      # Partial Correspondence
+        self.gmrc: GMRC = gmrc              # GMRC
+
+        self.parent: TreeNode = parent      # Parent Tree Node
+
+        self.g_depth: int = g_depth         # Grasping Depth
+
         self.interesting_children: list[TreeNode] = []
         self.mediocre_children: list[TreeNode] = []
-        self.mediocrity: int = mediocrity
-        self.tree: Tree = tree
-        self.actions = None
-        self.release_expanded = False
-        self.expanded = False
 
-        self.identifier = None
+        self.mediocrity: int = mediocrity   # Current Mediocrity
 
-        if self.tree.add_node_to_depth(self, self.g_depth):
-            self.is_novel = True            # A legal new node worth expanding
-        else:
-            self.is_novel = False           # A visited node not worth expanding
+        self.tree: Tree = tree              # Belonging Tree
+        
+        self.actions = None                 # All Potential Actions
 
-    def get_identifier(self):
-        if self.identifier is None:
-            self.identifier = self.tree.id_verdict.get_identifier(self.gmrc)
-        return self.identifier
+        self.release_expanded = False       # Whether have expanded releasing children
+        self.expanded = False               # Whether have expanded all children
 
-    def get_ethinicity(self):
-        w = self.gmrc.w
-        v = self.gmrc.v
-        c = self.gmrc.c
-        nc = self.cgf_manager.num_corresponded
-        is_cursed = self.cgf_manager.is_cursed
-        if is_cursed:
-            ss_gripper = self.cgf_manager.curse[0][3]
-        else:
-            ss_gripper = None
-        return (w, v, c, nc, is_cursed, ss_gripper)
+        self.id_ethnicity = None            # Tuple of node id and ethnicity
+
+        self.is_novel = self.tree.add_node_to_depth(self, self.cgf_manager.is_cursed)
+
+    # Get both node identifier and its ethnicity (based on grsp_ang parity)
+    def get_id_ethnicity(self):
+        if self.id_ethnicity is None:
+            self.id_ethnicity = self.tree.id_verdict.get_id_ethnicity(self.gmrc)
+        return self.id_ethnicity
         
     def expand_to(self, tar_g_depth = None):
         if tar_g_depth is not None:
@@ -348,8 +341,9 @@ class TreeNode:
     def is_goal(self):
         if len(self.cgf_manager.survival_idx) <= 0:
             return True
+        self_id, _ = self.get_id_ethnicity()
         return self.tree.id_verdict.is_identical(
-            self.get_identifier(), self.tree.target_id)
+            self_id, self.tree.target_id)
     
     # Release grasps that does not appear in goal configuration
     def extend_to_goal(self):
@@ -477,38 +471,37 @@ class Tree:
     def __init__(self, gmrc: GMRC, cgf_manager: CGFManager, tar_gmrc: GMRC,
                  ed_estimator: EDEstimator, id_verdict: IDVerdict):
         self.nodes_at_depth: list[TreeNode] = [[]]
-        self.nodes_with_ethnicity: dict[tuple] = {}
+        self.ethinicity2id = dict()
 
         self.max_g_depth = 0
+        self.target_gmrc = tar_gmrc
+
+        self.ed_estimator = ed_estimator
+        self.id_verdict = id_verdict
+
         self.root = TreeNode(gmrc,
                         cgf_manager=cgf_manager,
                         parent=None,
                         g_depth=0,
                         mediocrity=0,
                         tree = self)
-        self.target_gmrc = tar_gmrc
 
-        self.ed_estimator = ed_estimator
-        self.id_verdict = id_verdict
+        self.target_id, _ = self.id_verdict.get_id_ethnicity(tar_gmrc)
 
-        self.target_id = self.id_verdict.get_identifier(tar_gmrc)
+    def add_node_to_depth(self, node: TreeNode, force_add = False):
+        if not force_add:
+            node_id, ethnicity = node.get_id_ethnicity()
+            if not ethnicity in self.ethinicity2id:
+                self.ethinicity2id[ethnicity] = [node_id]
+            else:
+                for id in self.ethinicity2id[ethnicity]:
+                    if self.id_verdict.is_identical(id, node_id):
+                        return False                                # Prevent revisiting
 
-    def add_node_to_depth(self, node: TreeNode, g_depth: int):
-        ethinicity = node.get_ethinicity()
-        if not ethinicity in self.nodes_with_ethnicity:
-            self.nodes_with_ethnicity[ethinicity] = []
-        else:
-            id_1 = node.get_identifier()
-            for akin_node in self.nodes_with_ethnicity[ethinicity]:
-                id_2 = akin_node.get_identifier()
-                if self.id_verdict.is_identical(id_1, id_2):
-                    return False                                    # Prevent revisiting
-
-        while g_depth > self.max_g_depth:
+        while node.g_depth > self.max_g_depth:
             self.nodes_at_depth.append([])
             self.max_g_depth = self.max_g_depth + 1
-        self.nodes_at_depth[g_depth].append(node)
-        self.nodes_with_ethnicity[ethinicity].append(node)
+        self.nodes_at_depth[node.g_depth].append(node)
         return True
 
     # Traditional BFS that pushs the front by 1 g-depth with fixed mediocrity tolerance
@@ -613,7 +606,7 @@ class IDVerdict:
         self.device = device
 
     # Get the identifier (hash value) using GGNN
-    def get_identifier(self, gmrc):
+    def get_id_ethnicity(self, gmrc):
         x, edge_index, cyclic_neighbors, neighbor_phis, neighbor_num = \
             gmrc.get_representation()
         
@@ -630,20 +623,15 @@ class IDVerdict:
 
         graph_feat = self.ggnn_pooling(x_gnnout_feat, torch.tensor([x.size()[0]]))
 
-        grsp_ang_parity = np.sum(np.abs(gmrc.grsp_angs)) / np.pi * 180
+        grsp_ang_parity = int(np.sum(np.abs(gmrc.grsp_angs)) / np.pi * 180)
 
         return (graph_feat, grsp_ang_parity)
 
-    def is_identical(self, id_1: tuple, id_2: tuple):
-        grsp_ang_diff = np.abs(id_1[1] - id_2[1])
-        if grsp_ang_diff >= IDVerdict.thd:
-            return False
-
-        graph_feat_diff = id_1[0] - id_2[0]
+    def is_identical(self, id_1: torch.tensor, id_2: torch.tensor):
+        graph_feat_diff = id_1 - id_2
         distance = graph_feat_diff.norm(p=2, dim=-1)
         if distance >= IDVerdict.thd:
             return False        
-
         return True
 
 class CMRRP:
