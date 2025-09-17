@@ -298,6 +298,8 @@ class AtlasRRTNode:
         else:
             self.cost = 0.0
 
+        self.num_paths = 0                          # Number of paths including self
+
         c.add_node(self)                            # Add self to chart c's node list
 
     """
@@ -337,17 +339,35 @@ class AtlasRRTree:
 
     """
     Sample a point in the atlas within all charts that have been reached by this tree
+
+    Parameters:
+    ----------
+    is_optim: bool
+        Whether is sampling for optimization existing path (focus on refining samples)
     """
-    def sample(self):
-        node_charts = torch.tensor([node.chart.index for node in self.nodes],
-                                     dtype=torch.long, device=self.device)
-        counts = torch.bincount(node_charts)
-        nonzero_mask = counts > 0
-        weights = torch.zeros_like(counts, dtype=torch.float, device=self.device)
-        weights[nonzero_mask] = 1.0 / (counts[nonzero_mask].float() + 1.0)
-        probs = weights / weights.sum()
+    def sample(self, is_optim = False):
+        if not is_optim:                            # Exploration
+            node_charts = torch.tensor([node.chart.index for node in self.nodes],
+                                        dtype=torch.long, device=self.device)
+            counts = torch.bincount(node_charts)
+            nonzero_mask = counts > 0
+            weights = torch.zeros_like(counts, dtype=torch.float, device=self.device)
+            weights[nonzero_mask] = 1.0 / (counts[nonzero_mask].float() + 1.0)
+        else:                                       # Refinement
+            weights = torch.zeros(self.atlas.chart_num, 
+                                  dtype=torch.float, device=self.device)
+            for node in self.nodes:
+                if weights[node.chart.index] <= 0:
+                    weights[node.chart.index] = 1.0
+            for node in self.nodes:
+                weights[node.chart.index] = weights[node.chart.index] + node.num_paths
+                for neighbor_chart in node.chart.neighbors:
+                    nci = neighbor_chart.index
+                    if weights[nci] > 0:
+                        weights[nci] = weights[nci] + node.num_paths
+            
         while True:
-            r = torch.multinomial(probs, 1).item()
+            r = torch.multinomial(weights, 1).item()
             chart = self.atlas.get_chart(r)
             ur = chart.sample()
             if chart.in_P(ur):
@@ -367,15 +387,19 @@ class AtlasRRTree:
     def get_nearest_node(self, xr, chart: Chart = None) -> int:
         nearest_dis = torch.inf
         if chart is not None:                       # Search only ego and neighbor charts
-            search_range = chart.nodes
+            nearby_nodes = chart.nodes
             for neighbor_chart in chart.neighbors:
-                search_range = search_range + neighbor_chart.nodes
+                nearby_nodes = nearby_nodes + neighbor_chart.nodes
+            search_range = []
+            for node in nearby_nodes:
+                if node.tree is self:               # Only find nearest node within self
+                    search_range.append(node)
+            if len(search_range) == 0:
+                search_range = self.nodes
         else:
             search_range = self.nodes
         
         for node in search_range:
-            if not node.tree is self:               # Might meet nodes from other trees
-                continue
             dis = torch.norm(node.x - xr)           # Approximate using metric distance
             if dis < nearest_dis:
                 nearest_dis = dis
@@ -481,7 +505,12 @@ class AtlasRRTree:
         return branch[-1]
     
     """
-    Get the path from root to a node, its index is given as the parameter
+    Get the path from root to a node at node_index, also update all num_paths on path
+
+    Parameters:
+    ----------
+    node_index: int
+        The index of the node in tree
     """
     def get_path(self, node_index) -> list:
         path = []
@@ -490,6 +519,7 @@ class AtlasRRTree:
             if node is None:
                 break
             path.append(node.x)
+            node.num_paths = node.num_paths + 1
             node = node.parent
         path.reverse()
         return path
@@ -533,8 +563,9 @@ class AtlasRRTPlanner:
         optim_start_time = None
         optim_path = None
         optim_cost = torch.inf
+        is_optim = False                                    # Find a path first
         while True:
-            chart, ur = trees[i].sample()
+            chart, ur = trees[i].sample(is_optim)
             xr = chart.phi(ur)
             node_index_0 = trees[i].get_nearest_node(xr, chart)
             ni0 = trees[i].extend(xr, node_index_0, is_explore=True)
@@ -548,15 +579,16 @@ class AtlasRRTPlanner:
                 cost_1 = trees[1 - i].nodes[ni1].cost
                 cost = cost_0 + cost_1 + torch.norm(xl0 - xl1, p=2)
                 
-                if cost < optim_cost:
-                    path_1st_half = trees[i].get_path(ni0)
-                    path_2nd_half = trees[1 - i].get_path(ni1)
-                    path_2nd_half.reverse()
-                    path = path_1st_half + path_2nd_half
-                    if i == 1:
-                        path.reverse()
+                path_1st_half = trees[i].get_path(ni0)
+                path_2nd_half = trees[1 - i].get_path(ni1)
+                path_2nd_half.reverse()
+                path = path_1st_half + path_2nd_half
+                if i == 1:
+                    path.reverse()
 
+                if cost < optim_cost:
                     if optim_path is None:
+                        is_optim = True                     # Optimize the path
                         optim_start_time = time.time()
 
                     optim_path = path
