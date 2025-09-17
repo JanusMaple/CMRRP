@@ -128,7 +128,7 @@ class Chart:
         return True
     
     """
-    Find the most suitable neighbor for a out-of-P point
+    Find the most suitable neighbor for an out-of-P point
     """
     def find_best_neighbor(self, u, x):
         possible_neighbors = []
@@ -230,7 +230,7 @@ class Atlas:
     c: Chart
         The chart that is querying neighboring charts
 
-    Returen:
+    Return:
     ----------
     neighbor_chart_indexes: list[int]
         The indexes of all neighboring charts of the new chart
@@ -293,6 +293,11 @@ class AtlasRRTNode:
         self.tree = tree
         self.parent = parent
 
+        if parent is not None:
+            self.cost = parent.cost + torch.norm(self.x - parent.x, p=2)
+        else:
+            self.cost = 0.0
+
         c.add_node(self)                            # Add self to chart c's node list
 
     """
@@ -305,6 +310,7 @@ class AtlasRRTNode:
 class AtlasRRTree:
     delta = 1e-2                                    # Step of branch extension
     lambda_ = 3.0                                   # Branch length regularization
+    gamma = delta                                   # Near node criteria for rewiring
 
     """
     Tree in Atlas-RRT
@@ -375,6 +381,37 @@ class AtlasRRTree:
                 nearest_dis = dis
                 nearest_node_index = node.node_index
         return nearest_node_index
+    
+    """
+    Get neighboring nodes in the tree from self-chart and neighboring charts
+
+    Parameters:
+    ----------
+    node: AtlasRRTNode
+        The queried tree node
+    require_dis: bool
+        Whether requires returning the distance to the neighboring nodes
+    """
+    def get_neighbor_nodes(self, node: AtlasRRTNode, require_dis = False):
+        all_charts = [node.chart] + node.chart.neighbors
+        neighbor_nodes = []
+        if require_dis:
+            distances = []
+        for chart in all_charts:
+            for candidate_node in chart.nodes:
+                if candidate_node.tree is not self:
+                    continue
+                if candidate_node is node:
+                    continue
+                dis = torch.norm(candidate_node.x - node.x, p=2)
+                if dis >=AtlasRRTree.gamma:
+                    continue
+                neighbor_nodes.append(candidate_node)
+                distances.append(dis)
+        if not require_dis:
+            return neighbor_nodes
+        else:
+            return neighbor_nodes, distances
 
     """
     Extend from current tree to a given ambient space point and return ending node index
@@ -388,7 +425,7 @@ class AtlasRRTree:
     is_explore: bool
         Whether the extension is exploring. If true, xr is not on the manifold
 
-    Returen:
+    Return:
     ----------
     last_node_index: int
         The index of the last extended node (node_index if no extension happened)
@@ -423,7 +460,8 @@ class AtlasRRTree:
                 self.atlas.add_chart(node.x)
                 chart_created = True
                 chart = node.chart                  # Now it should have changed
-            self.nodes.append(AtlasRRTNode(self.node_num, xj, chart, None, self, node))
+            new_node = AtlasRRTNode(self.node_num, xj, chart, None, self, node)
+            self.nodes.append(new_node)
             branch.append(self.node_num)
             self.node_num = self.node_num + 1
             chart.add_node(self.nodes[-1])
@@ -432,6 +470,13 @@ class AtlasRRTree:
                 break                               # STOP: Traveled far enough
             if path_length > AtlasRRTree.lambda_ * path_len_lb:
                 break                               # STOP: Traveled long enough
+
+            neighbor_nodes, distances = self.get_neighbor_nodes(new_node, True)
+            for neighbor_node, dis in zip(neighbor_nodes, distances):
+                new_cost = new_node.cost + dis
+                if new_cost < neighbor_node.cost:
+                    neighbor_node.cost = new_cost
+                    neighbor_node.parent = new_node
 
         return branch[-1]
     
@@ -471,10 +516,23 @@ class AtlasRRTPlanner:
         self.Ts = AtlasRRTree(xs, self.atlas, self.atlas.get_chart(0), Collision)
         self.Tg = AtlasRRTree(xg, self.atlas, self.atlas.get_chart(1), Collision)
 
-    def plan(self, time_budget = 60.0):
+    """
+    Sample and plan a path from start to end
+
+    Parameters:
+    ----------
+    total_budget: float
+        The total plan time budget, has to return before this time
+    optim_budget: float
+        The optimization time budget for reducing the cost after finding a path
+    """
+    def plan(self, total_budget = 60.0, optim_budget = 5.0):
         trees = [self.Ts, self.Tg]
         i = 0
         start_time = time.time()
+        optim_start_time = None
+        optim_path = None
+        optim_cost = torch.inf
         while True:
             chart, ur = trees[i].sample()
             xr = chart.phi(ur)
@@ -484,17 +542,37 @@ class AtlasRRTPlanner:
             node_index_1 = trees[1 - i].get_nearest_node(xr)
             ni1 = trees[1 - i].extend(xr, node_index_1, is_explore=False)
             xl1 = trees[1 - i].nodes[ni1].x
+
             if torch.norm(xl0 - xl1, 2) < AtlasRRTree.delta:
+                cost_0 = trees[i].nodes[ni0].cost
+                cost_1 = trees[1 - i].nodes[ni1].cost
+                cost = cost_0 + cost_1 + torch.norm(xl0 - xl1, p=2)
+                
+                if cost < optim_cost:
+                    path_1st_half = trees[i].get_path(ni0)
+                    path_2nd_half = trees[1 - i].get_path(ni1)
+                    path_2nd_half.reverse()
+                    path = path_1st_half + path_2nd_half
+                    if i == 1:
+                        path.reverse()
+
+                    if optim_path is None:
+                        optim_start_time = time.time()
+
+                    optim_path = path
+                    optim_cost = cost
+
+            if time.time() - start_time > total_budget:
                 break
-            if time.time() - start_time > time_budget:
-                print("\033[91mRunning out of time budget!\033[0m")
-                return []
+            if not optim_start_time is None:
+                if time.time() - optim_start_time > optim_budget:
+                    break
+            
             i = 1 - i
-        path_1st_half = trees[i].get_path(ni0)
-        path_2nd_half = trees[1 - i].get_path(ni1)
-        path_2nd_half.reverse()
-        path = path_1st_half + path_2nd_half
-        if i == 1:
-            path.reverse()
-        return path
+        
+        if optim_path is None:
+            print("\033[91mRunning out of time budget!\033[0m")
+            return []
+
+        return optim_path
     
