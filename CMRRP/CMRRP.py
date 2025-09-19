@@ -173,15 +173,19 @@ class CGFManager:
         idxes = self.get_angle_idxes(emt_new_gf, emt_new_gt, False)
         for idx in idxes:
             gamma = -self.Gamma_final[idx][0]
-            if not gamma in cursed_choices:
-                cursed_choices[gamma] = []
-            cursed_choices[gamma].append((emt_new_gf, emt_new_gt, idx, new_gf))
+            built_grip = self.Gamma_final[idx][1] // 3
+            key = (gamma, built_grip)
+            if not key in cursed_choices:
+                cursed_choices[key] = []
+            cursed_choices[key].append((emt_new_gf, emt_new_gt, idx, new_gf))
         idxes = self.get_angle_idxes(emt_new_gt, emt_new_gf, False)
         for idx in idxes:
             gamma = self.Gamma_final[idx][0]
-            if not gamma in cursed_choices:
-                cursed_choices[gamma] = []
-            cursed_choices[gamma].append((emt_new_gt, emt_new_gf, idx, new_gf))
+            built_grip = self.Gamma_final[idx][1] // 3
+            key = (gamma, built_grip)
+            if not key in cursed_choices:
+                cursed_choices[key] = []
+            cursed_choices[key].append((emt_new_gt, emt_new_gf, idx, new_gf))
         if is_w_grip:
             emt_new_gi = 2 * (new_gi // 2) + 1 - new_gi % 2
             idxes = self.get_angle_idxes(emt_new_gf, emt_new_gi, False)
@@ -190,18 +194,22 @@ class CGFManager:
                     gamma = -np.pi - gamma_0 - self.Gamma_final[idx][0]
                 else:
                     gamma = np.pi - gamma_0 - self.Gamma_final[idx][0]
-                if not gamma in cursed_choices:
-                    cursed_choices[gamma] = []
-                cursed_choices[gamma].append((emt_new_gf, emt_new_gi, idx, new_gf))
+                built_grip = self.Gamma_final[idx][1] // 3
+                key = (gamma, built_grip)
+                if not key in cursed_choices:
+                    cursed_choices[key] = []
+                cursed_choices[key].append((emt_new_gf, emt_new_gi, idx, new_gf))
             idxes = self.get_angle_idxes(emt_new_gi, emt_new_gf, False)
             for idx in idxes:
                 if self.Gamma_final[idx][0] < 0:
                     gamma = np.pi - gamma_0 - (-self.Gamma_final[idx][0])
                 else:
                     gamma = -np.pi - gamma_0 - (-self.Gamma_final[idx][0])
-                if not gamma in cursed_choices:
-                    cursed_choices[gamma] = []
-                cursed_choices[gamma].append((emt_new_gi, emt_new_gf, idx, new_gf))
+                built_grip = self.Gamma_final[idx][1] // 3
+                key = (gamma, built_grip)
+                if not key in cursed_choices:
+                    cursed_choices[key] = []
+                cursed_choices[key].append((emt_new_gi, emt_new_gf, idx, new_gf))
 
         choices.extend(list(cursed_choices.items()))
         return choices
@@ -233,10 +241,12 @@ class CGFManager:
 # A search tree node contains: 1. a unique gmrc shape; 2. a partial correspondence
 class TreeNode:
     mediocrity_tolerance = 0
+    is_grouping = False
 
     def __init__(self, gmrc: GMRC, cgf_manager: CGFManager, 
                  parent: TreeNode = None, g_depth: int = 0,
-                 mediocrity: int = 0, tree: Tree = None):
+                 mediocrity: int = 0, tree: Tree = None, 
+                 group_feature: tuple = None):
         self.cgf_manager = cgf_manager      # Partial Correspondence
         self.gmrc: GMRC = gmrc              # GMRC
 
@@ -244,14 +254,15 @@ class TreeNode:
 
         self.g_depth: int = g_depth         # Grasping Depth
 
-        self.interesting_children: list[TreeNode] = []
-        self.mediocre_children: list[TreeNode] = []
+        self.children: list[TreeNode] = []  # Children Nodes
 
         self.mediocrity: int = mediocrity   # Current Mediocrity
 
         self.tree: Tree = tree              # Belonging Tree
+
+        self.group_feature = group_feature  # Group feature for MCTS with group nodes
         
-        self.actions = None                 # All Potential Actions
+        self.actions = None                 # All potential actions
 
         self.release_expanded = False       # Whether have expanded releasing children
         self.expanded = False               # Whether have expanded all children
@@ -266,14 +277,18 @@ class TreeNode:
             self.id_ethnicity = self.tree.id_verdict.get_id_ethnicity(self.gmrc)
         return self.id_ethnicity
         
-    def expand_to(self, tar_g_depth = None):
-        if tar_g_depth is not None:
-            if self.g_depth > tar_g_depth:
-                return None
-            if self.g_depth == tar_g_depth:
-                release_only  = True
+    def expand_to(self, tar_depth = None, is_g_depth = True, cur_depth = 0):
+        if tar_depth is not None:
+            if is_g_depth:                                      # Expand to grasp depth
+                if self.g_depth > tar_depth:
+                    return None
+                if self.g_depth == tar_depth:
+                    release_only  = True
+                else:
+                    release_only = False
             else:
-                release_only = False
+                if cur_depth >= tar_depth:                      # Expand to tree depth
+                    return None
             
         if self.mediocrity > TreeNode.mediocrity_tolerance:
             return None
@@ -289,10 +304,15 @@ class TreeNode:
                     if not self.cgf_manager.can_release[action]:
                         continue
                     new_gmrc.execute_action(action)
+                    if not TreeNode.is_grouping:
+                        child_group_feature = None
+                    else:
+                        child_group_feature = (0, 0)
                     new_node = TreeNode(new_gmrc, self.cgf_manager.copy(),
-                                        self, self.g_depth, self.mediocrity, self.tree)
+                                        self, self.g_depth, self.mediocrity,
+                                        self.tree, child_group_feature)
                     if new_node.is_novel:
-                        self.interesting_children.append(new_node)
+                        self.children.append(new_node)
                 else:                                           # Grasp
                     if release_only:
                         continue
@@ -308,34 +328,42 @@ class TreeNode:
                             new_cgf_manager = self.cgf_manager.copy()
                             new_cgf_manager.break_curse()
                             new_cgf_manager.get_angle(gf, gt, idx)
+                            if not TreeNode.is_grouping:
+                                child_group_feature = None
+                            else:
+                                # The grip that is being constructed by this action
+                                built_grip = new_cgf_manager.correspondence[gf] // 3
+                                child_group_feature = (1, built_grip)
                             new_node = TreeNode(new_gmrc, new_cgf_manager,
-                                        self, self.g_depth + 1, 0, self.tree)
+                                        self, self.g_depth + 1, 0,
+                                        self.tree, child_group_feature)
                             if new_node.is_novel:
-                                self.interesting_children.append(new_node)
+                                self.children.append(new_node)
                         continue
                     if not new_gmrc.execute_action(action):
                         continue
-                    ims, mms = self._get_all_memebers_in_grasping_group(
-                        new_gmrc, action)
-                    self.interesting_children.extend(ims)
-                    self.mediocre_children.extend(mms)
+                    self.children.extend(
+                        self._get_all_memebers_in_grasping_group(new_gmrc, action))
         
         self.release_expanded = True
         if not release_only:
             self.expanded = True
 
-        self.interesting_children.reverse()
-        for child in self.interesting_children:
+        self.children.reverse()
+        for child in self.children:
             if child.is_goal():
                 return child
-            grand_child = child.expand_to(tar_g_depth)
-            if grand_child is not None:
+            grand_child = child.expand_to(tar_depth, is_g_depth, cur_depth + 1)
+            if grand_child is not None:                         # Early Stop
                 return grand_child
 
         return None
 
-    def expand(self, extra_depth: int = 1):
-        return self.expand_to(self.g_depth + extra_depth)
+    def expand(self, extra_depth: int = 1, is_g_depth = True):
+        if is_g_depth:
+            return self.expand_to(self.g_depth + extra_depth, is_g_depth)
+        else:
+            return self.expand_to(extra_depth, is_g_depth)
 
     # Whether this node contains all goal configuration angles
     def is_goal(self):
@@ -359,33 +387,31 @@ class TreeNode:
             if self.tree.target_gmrc.module2gripper[ht][mdl] < 0:
                 child_gmrc = self.gmrc.copy()
                 child_gmrc.execute_action(gripper)
+                if not TreeNode.is_grouping:
+                    child_group_feature = None
+                else:
+                    child_group_feature = (0, 0)
                 child = TreeNode(child_gmrc, self.cgf_manager.copy(),
-                                 self, self.g_depth, 
-                                 self.mediocrity, self.tree)
+                                 self, self.g_depth, self.mediocrity,
+                                 self.tree, child_group_feature)
                 break
         return child.extend_to_goal()
 
     # Get all reasonable children from the same grasping action based on eldest sibling
     # NOTE: Will not have a->b with alpha and b->a with alpha
     #       since will only have a->b from EMRC.get_all_actions()
-    """
-    Return (interesting_members: list[TreeNode], mediocre_members: list[TreeNode])
-        interesting_members:    mediority <= mediority_tolerance
-        mediocre_members:       mediority > mediority_tolerance
-    """
     def _get_all_memebers_in_grasping_group(self, new_gmrc: GMRC, action: tuple):
-        optim_node = TreeNode(new_gmrc, self.cgf_manager.copy(),
-                            self, self.g_depth + 1, self.mediocrity + 1, self.tree)
-        if optim_node.is_novel:
-            if self.mediocrity < TreeNode.mediocrity_tolerance:
-                interesting_members = [optim_node]
-                mediocre_members = []
-            else:
-                interesting_members = []
-                mediocre_members = [optim_node]
+        if not TreeNode.is_grouping:
+            child_group_feature = None
         else:
-            interesting_members = []
-            mediocre_members = []
+            child_group_feature = (2, 0)
+        optim_node = TreeNode(new_gmrc, self.cgf_manager.copy(),
+                            self, self.g_depth + 1, self.mediocrity + 1,
+                            self.tree, child_group_feature)
+        if optim_node.is_novel:
+            members = [optim_node]
+        else:
+            members = []
         
         gf = action[0]
         gt = action[1]
@@ -402,33 +428,36 @@ class TreeNode:
                     if np.abs(ang - mid_ang) < 0.001 / 180 * np.pi:
                         optim_node.mediocrity = 0
                         optim_node.cgf_manager.get_angle(gf, gt, idx)
-                        interesting_members.append(optim_node)
-                        mediocre_members = []
-            return (interesting_members, mediocre_members)
+                        members.append(optim_node)
+            return members
 
         min_gmrc = new_gmrc.copy()
         min_gmrc.modify_grsp_ang(grip, -GMRC.grsp_ang_cap)
         min_ang = min_gmrc.get_grip_gamma(grip)
         if min_ang < mid_ang:
+            if not TreeNode.is_grouping:
+                child_group_feature = None
+            else:
+                child_group_feature = (2, 0)
             min_node = TreeNode(min_gmrc, self.cgf_manager.copy(),
-                                self, self.g_depth + 1, self.mediocrity + 1, self.tree)
+                                self, self.g_depth + 1, self.mediocrity + 1,
+                                self.tree, child_group_feature)
             if min_node.is_novel:
-                if self.mediocrity < TreeNode.mediocrity_tolerance:
-                    interesting_members.append(min_node)
-                else:
-                    mediocre_members.append(min_node)
+                members.append(min_node)
 
         max_gmrc = new_gmrc.copy()
         max_gmrc.modify_grsp_ang(grip, GMRC.grsp_ang_cap)
         max_ang = max_gmrc.get_grip_gamma(grip)
         if max_ang > mid_ang:
+            if not TreeNode.is_grouping:
+                child_group_feature = None
+            else:
+                child_group_feature = (2, 0)
             max_node = TreeNode(max_gmrc, self.cgf_manager.copy(),
-                                self, self.g_depth + 1, self.mediocrity + 1, self.tree)
+                                self, self.g_depth + 1, self.mediocrity + 1,
+                                self.tree, child_group_feature)
             if max_node.is_novel:
-                if self.mediocrity < TreeNode.mediocrity_tolerance:
-                    interesting_members.append(max_node)
-                else:
-                    mediocre_members.append(max_node)
+                members.append(max_node)
 
         if is_w_grip:
             gi = new_gmrc.gripper2module[3 * grip]
@@ -442,7 +471,7 @@ class TreeNode:
                 # "ss" means stepping-stone here
                 ss_cgf_manager = self.cgf_manager.copy()
                 ss_cgf_manager.cursed_by(choice[1])
-                ang = choice[0]
+                ang = choice[0][0]
                 if ang <= min_ang and ang >= max_ang:
                     continue
                 ss_gmrc = new_gmrc.copy()
@@ -450,10 +479,18 @@ class TreeNode:
                     continue
                 if np.abs(ss_gmrc.get_grip_gamma(grip) - ang) > 1e-3:
                     continue
-                ss_node = TreeNode(ss_gmrc, ss_cgf_manager, 
-                                   self, self.g_depth + 1, 0, self.tree)
+                
+                if not TreeNode.is_grouping:
+                    child_group_feature = None
+                else:
+                    # The grip that is being constructed by this action
+                    built_grip = choice[0][1]
+                    child_group_feature = (1, built_grip)
+                ss_node = TreeNode(ss_gmrc, ss_cgf_manager,
+                                   self, self.g_depth + 1, 0,
+                                   self.tree, child_group_feature)
                 if ss_node.is_novel:
-                    interesting_members.append(ss_node)
+                    members.append(ss_node)
             else:                                       # Building some correspondence
                 idx = choice
                 # "bc" means building correspondence here
@@ -470,14 +507,21 @@ class TreeNode:
                     continue
                 if np.abs(bc_gmrc.get_grip_gamma(grip) - ang) > 1e-3:
                     continue
-                bc_node = TreeNode(bc_gmrc, bc_cgf_manager, 
-                                self, self.g_depth + 1, 0, self.tree)
+                if not TreeNode.is_grouping:
+                    child_group_feature = None
+                else:
+                    # The grip that is being constructed by this action
+                    built_grip = bc_cgf_manager.correspondence[gf] // 3
+                    child_group_feature = (1, built_grip)
+                bc_node = TreeNode(bc_gmrc, bc_cgf_manager,
+                                self, self.g_depth + 1, 0,
+                                self.tree, child_group_feature)
                 if bc_node.is_novel:
-                    interesting_members.append(bc_node)
+                    members.append(bc_node)
                 if bc_node.is_goal():
                     break
 
-        return (interesting_members, mediocre_members)
+        return members
 
 class Tree:
     def __init__(self, gmrc: GMRC, cgf_manager: CGFManager, tar_gmrc: GMRC,
@@ -491,12 +535,17 @@ class Tree:
         self.ed_estimator = ed_estimator
         self.id_verdict = id_verdict
 
+        if not TreeNode.is_grouping:
+            child_group_feature = None
+        else:
+            child_group_feature = (0, 0)
         self.root = TreeNode(gmrc,
-                        cgf_manager=cgf_manager,
-                        parent=None,
-                        g_depth=0,
-                        mediocrity=0,
-                        tree = self)
+                        cgf_manager = cgf_manager,
+                        parent = None,
+                        g_depth = 0,
+                        mediocrity = 0,
+                        tree = self,
+                        group_feature = child_group_feature)
 
         self.target_id, _ = self.id_verdict.get_id_ethnicity(tar_gmrc)
 
@@ -655,6 +704,85 @@ class IDVerdict:
         if distance >= IDVerdict.thd:
             return False        
         return True
+    
+# Monte Carlo Tree Node
+class MCTreeNode:
+    def __init__(self, node: TreeNode, parent: MCTreeNode = None):
+        self.node = node
+        self.parent = parent
+        self.children: list[MCTreeNode] = []
+        self.is_expanded = False
+
+    def expand(self):
+        goal_node = self.node.expand(1, False)
+        if goal_node is not None:
+            pass        # TODO: Target found!!!
+        group2node = {}
+        num_groups = 0
+        for child_node in self.node.children:
+            g = child_node.group_feature[0]
+            if not g in group2node:
+                group2node[g] = []
+                num_groups = num_groups + 1
+            else:
+                group2node[g].append(child_node)
+        if num_groups == 1:
+            for child_node in self.node.children:
+                self.children.append(MCTreeNode(child_node, self))
+        else:
+            for group in group2node:
+                self.children.append(MCTreeGroupNode(
+                    group2node[group],
+                    self,
+                    0
+                ))
+            for child in self.children:
+                child.expand()  # Recursively expand all group nodes
+
+        self.is_expanded = True
+
+    def select(self):
+        pass
+
+# Monte Carlo Tree Group Node
+class MCTreeGroupNode(MCTreeNode):
+    def __init__(self, nodes: list[TreeNode], parent: MCTreeNode, 
+                 group_level: int):
+        super.__init__(None, parent)
+        self.nodes = nodes
+        self.group_level = group_level
+    
+    # Expand to 1. more group nodes or 2. concrete nodes
+    def expand(self):
+        subgroup2node = {}
+        num_subgroup = 0
+        for node in self.nodes:
+            g = node.group_feature[self.group_level + 1]
+            if not g in subgroup2node:
+                subgroup2node[g] = []
+                num_subgroup = num_subgroup + 1
+            else:
+                subgroup2node[g].append(node)
+        
+        if num_subgroup == 1:
+            for node in self.nodes:
+                self.children.append(MCTreeNode(node, self))
+        else:
+            for subgroup in subgroup2node:
+                self.children.append(MCTreeGroupNode(
+                    subgroup2node[subgroup],
+                    self,
+                    self.group_level + 1
+                ))
+            for child in self.children:
+                child.expand()  # Recursively expand all group nodes
+
+        self.is_expanded = True
+
+# Monte Carlo Tree
+class MCTree:
+    def __init__(self, node: TreeNode):
+        self.root = MCTreeNode(node)
 
 class CMRRP:
     def __init__(self,
@@ -674,6 +802,7 @@ class CMRRP:
     Methods:
         BFS: Simple breadth first search with fixed mediocrity tolerance
         DMT_BFS: BFS with dynamic mediocrity tolerance
+        MCTS: Single Monte Carlo Tree Search with Hierarchical Grouping Nodes
     """
     def plan(self, gmrc_1: GMRC, gmrc_2: GMRC, method = "BFS"):
         GMRC.suppress_action_err = True
@@ -683,12 +812,18 @@ class CMRRP:
         self.tree = Tree(gmrc_1, cgf_manager, gmrc_2, self.ed_estimator, self.id_verdict)
 
         if method == "BFS":
+            TreeNode.is_grouping = False
             while True:
                 node = self.tree.push_front()
                 if node is not None:
                     break
         elif method == "DMT_BFS":
+            TreeNode.is_grouping = False
             node = self.tree.explore()
+        elif method == "MCTS":
+            TreeNode.mediocrity_tolerance = 9999
+            TreeNode.is_grouping = True
+            mctree = MCTree(self.tree.root)
 
         path = [node]
         while node.parent is not None:
