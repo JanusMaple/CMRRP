@@ -707,16 +707,22 @@ class IDVerdict:
     
 # Monte Carlo Tree Node
 class MCTreeNode:
-    def __init__(self, node: TreeNode, parent: MCTreeNode = None):
+    def __init__(self, node: TreeNode, parent: MCTreeNode = None,
+                 tree: MCTree = None):
         self.node = node
         self.parent = parent
+        if tree is None:
+            self.tree = self.parent.tree
+        else:
+            self.tree = tree
         self.children: list[MCTreeNode] = []
         self.is_expanded = False
 
     def expand(self):
         goal_node = self.node.expand(1, False)
         if goal_node is not None:
-            pass        # TODO: Target found!!!
+            self.tree.is_goal_found = True
+            self.tree.goal_node = goal_node.extend_to_goal()
         group2node = {}
         num_groups = 0
         for child_node in self.node.children:
@@ -782,7 +788,12 @@ class MCTreeGroupNode(MCTreeNode):
 # Monte Carlo Tree
 class MCTree:
     def __init__(self, node: TreeNode):
-        self.root = MCTreeNode(node)
+        self.root = MCTreeNode(node, None, self)
+        self.is_goal_found = False
+        self.goal_node: TreeNode = None
+
+    def get_path(self):
+        pass
 
 class CMRRP:
     def __init__(self,
