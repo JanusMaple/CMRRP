@@ -709,15 +709,25 @@ class IDVerdict:
 class MCTreeNode:
     def __init__(self, node: TreeNode, parent: MCTreeNode = None,
                  tree: MCTree = None):
-        self.node = node
-        self.parent = parent
+        self.node = node                                            # Actual tree node
+        self.parent = parent                                        # Parent MCTreeNode
         if tree is None:
-            self.tree = self.parent.tree
+            self.tree = self.parent.tree                            # Belonging MCTree
         else:
             self.tree = tree
-        self.children: list[MCTreeNode] = []
-        self.is_expanded = False
+        self.children: list[MCTreeNode] = []                        # Children MCTreeNode
+        self.n = 0                                                  # Times of selected
+        self.Q = 0                                                  # Estimated node value
+        # NOTE: If not expanded, the node is actually not added in the MCTree
+        self.is_expanded = False                                    # Whether expanded
 
+    # N: Number of times that the parent of self has been selected
+    def get_UCB(self, N):
+        if self.n == 0:
+            return self.tree.get_fpu()
+        return self.Q + self.tree.c * np.sqrt(np.log(N) / self.n)
+
+    # The expand() function is also serving as part of the heuristic function
     def expand(self):
         goal_node = self.node.expand(1, False)
         if goal_node is not None:
@@ -747,8 +757,44 @@ class MCTreeNode:
 
         self.is_expanded = True
 
+    # Select a node that 1. leads to a leaf node or 2. to be expanded and added
     def select(self):
-        pass
+        ucb_values = np.array([child.get_UCB(self.n) for child in self.children])
+        p = torch.tensor(np.exp(ucb_values) / np.sum(np.exp(ucb_values)))
+        return torch.multinomial(p, 1).item()                   # int(softmax(UCB))
+
+    # Instead of roll-outs, a heuristic is used instead for evaluating the node
+    #   NOTE: This method is domain-specific (related to actual tree nodes)
+    def simulate(self):
+        num_releasing = 0
+        num_constructive = 0
+        num_mediocre = 0
+        if len(self.children) == 0:
+            return 0
+        if not isinstance(self.children[0], MCTreeGroupNode):
+            if self.children[0].node.group_feature[0] == 0:
+                num_releasing = len(self.children)
+            elif self.children[0].node.group_feature[0] == 1:
+                num_constructive = len(self.children)
+            elif self.children[0].node.group_feature[0] == 2:
+                num_mediocre = len(self.children)
+        else:
+            for child in self.children:
+                assert isinstance(child, MCTreeGroupNode)
+                if child.group_feature[0] == 0:
+                    num_releasing = len(self.children)
+                elif child.group_feature[0] == 1:
+                    num_constructive = len(self.children)
+                elif child.group_feature[0] == 2:
+                    num_mediocre = len(self.children)
+        score = 0       # TODO
+        return score
+
+    def backpropagate(self, Q):
+        self.Q = (self.Q * self.n + Q) / (self.n + 1)
+        self.n = self.n + 1
+        if self.parent is not None:
+            self.parent.backpropagate(Q)
 
 # Monte Carlo Tree Group Node
 class MCTreeGroupNode(MCTreeNode):
@@ -756,8 +802,15 @@ class MCTreeGroupNode(MCTreeNode):
                  group_level: int):
         super.__init__(None, parent)
         self.nodes = nodes
+        self.num_nodes = len(self.nodes)
+        self.group_feature = self.nodes[0].group_feature
         self.group_level = group_level
     
+    def get_UCB(self, N):
+        if self.n == 0:
+            return self.tree.get_fpu(self.group_feature, self.group_level)
+        return self.Q + self.tree.c * np.sqrt(np.log(N) / self.n)
+
     # Expand to 1. more group nodes or 2. concrete nodes
     def expand(self):
         subgroup2node = {}
@@ -781,16 +834,40 @@ class MCTreeGroupNode(MCTreeNode):
                     self.group_level + 1
                 ))
             for child in self.children:
-                child.expand()  # Recursively expand all group nodes
+                child.expand()                      # Recursively expand all group nodes
 
         self.is_expanded = True
 
+    def backpropagate(self, Q):
+        if Q > self.Q:
+            self.Q = Q                              # Group maximum as group value
+        self.parent.backpropagate(Q)                # Group node must have a parent
+
 # Monte Carlo Tree
 class MCTree:
+    c = 1.4                                         # UCB Constant
+    
+    @staticmethod
+    def get_fpu(group_feature: tuple = None,        # First-play urgency
+                group_level: int = None):
+        if group_level is None:
+            return 1.0                              # Concrete Node
+        elif group_level == 0:
+            if group_feature[group_level] == 0:
+                return 50.0                         # Releasing
+            elif group_feature[group_level] == 1:
+                return 5.0                          # Constructive Grasp
+            elif group_feature[group_level] == 2:
+                return 0.1                          # Mediocre Grasp
+        elif group_level == 1:
+            return 1.0                              # Grip Group Node
+
     def __init__(self, node: TreeNode):
         self.root = MCTreeNode(node, None, self)
         self.is_goal_found = False
         self.goal_node: TreeNode = None
+
+        self.root.expand()                          # Expand and add to tree
 
     def get_path(self):
         pass
