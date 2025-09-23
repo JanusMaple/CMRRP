@@ -33,7 +33,7 @@ class CGFManager:
 
     # The initialization methods should only be called for the root node, once
     def __init__(self, Gamma_final: list, survival_idx: list = None, 
-                 correspondence: list = None, num_corresponded: int = 0,
+                 correspondence: list = None, num_constructed: int = 0,
                  gf_idx_list: list = None, gt_idx_list: list = None, 
                  can_release = None, is_cursed = False, curse = None):
         self.Gamma_final = Gamma_final
@@ -49,8 +49,8 @@ class CGFManager:
         else:
             self.correspondence = correspondence
 
-        # Number of modules that have been corresponded
-        self.num_corresponded = num_corresponded
+        # Number of constructive grasps that have been taken
+        self.num_constructed = num_constructed
 
         # Whether a gripper can release (False if has participated in a grasp)
         if can_release is None:
@@ -95,11 +95,11 @@ class CGFManager:
         if self.correspondence[new_gf] < 0:
             self.correspondence[new_gf] = gf
             self.correspondence[emt_new_gf] = emt_gf
-            self.num_corresponded = self.num_corresponded + 1
         if self.correspondence[new_gt] < 0:
             self.correspondence[new_gt] = gt
             self.correspondence[emt_new_gt] = emt_gt
-            self.num_corresponded = self.num_corresponded + 1
+        
+        self.num_constructed = self.num_constructed + 1
         
         if not is_w_grip:
             new_survival_idx = []
@@ -231,7 +231,7 @@ class CGFManager:
         return CGFManager(Gamma_final=self.Gamma_final,
                           survival_idx=copy.deepcopy(self.survival_idx),
                           correspondence=copy.deepcopy(self.correspondence),
-                          num_corresponded=self.num_corresponded,
+                          num_constructed=self.num_constructed,
                           gf_idx_list=copy.deepcopy(self.gf_idx_list),
                           gt_idx_list=copy.deepcopy(self.gt_idx_list),
                           can_release=copy.deepcopy(self.can_release),
@@ -289,6 +289,8 @@ class TreeNode:
             else:
                 if cur_depth >= tar_depth:                      # Expand to tree depth
                     return None
+                else:
+                    release_only = False
             
         if self.mediocrity > TreeNode.mediocrity_tolerance:
             return None
@@ -531,6 +533,8 @@ class Tree:
 
         self.max_g_depth = 0
         self.target_gmrc = tar_gmrc
+        # The number of constructive grasps to take for building target configuration
+        self.num_constructive_grasp = tar_gmrc.w * 2 + tar_gmrc.v
 
         self.ed_estimator = ed_estimator
         self.id_verdict = id_verdict
@@ -716,16 +720,44 @@ class MCTreeNode:
         else:
             self.tree = tree
         self.children: list[MCTreeNode] = []                        # Children MCTreeNode
-        self.n = 0                                                  # Times of selected
-        self.Q = 0                                                  # Estimated node value
+        self.survival_children: list[int] = []                      # Alive Children
+        self.n = 0.0                                                # Times of selected
+        self.Q = 0.0                                                # Estimated node value
         # NOTE: If not expanded, the node is actually not added in the MCTree
         self.is_expanded = False                                    # Whether expanded
+
+    def __str__(self):
+        return f"Type: N, GF: {self.node.group_feature}; Q: {self.Q}; N: {self.n}"
+
+    def __repr__(self):
+        return self.__str__()
+
+    # Get first-play urgency of this node
+    # NOTE: This is pretty domain-specific
+    def get_FPU(self):
+        constructed = self.node.cgf_manager.num_constructed
+        to_construct = self.node.tree.num_constructive_grasp
+        progress = constructed / to_construct
+        if self.node.group_feature[0] == 0:                         # From releasing
+            """ Disencourage Exploration when all in a Releasing Group """
+            return MCTree.w_promising * MCTree.promising_score_mediocre
+        elif self.node.group_feature[0] == 1:                       # From constructing
+            """ Encourage Exploration to Find Best Constructive Action """
+            pseudo_Q = MCTree.w_progress * progress + \
+                MCTree.w_promising * MCTree.promising_score_constructive
+            num_siblings = len(self.parent.children)
+            return pseudo_Q + MCTree.c * np.sqrt(np.log(num_siblings))
+        else:                                                       # From mediocre
+            """ Disencourage Exploration when all in a Mediocre Group """
+            return MCTree.w_promising * MCTree.promising_score_mediocre
 
     # N: Number of times that the parent of self has been selected
     def get_UCB(self, N):
         if self.n == 0:
-            return self.tree.get_fpu()
-        return self.Q + self.tree.c * np.sqrt(np.log(N) / self.n)
+            return self.get_FPU()
+        if self.Q == 0:
+            return 0.0
+        return self.Q + MCTree.c * np.sqrt(np.log(N) / self.n)
 
     # The expand() function is also serving as part of the heuristic function
     def expand(self):
@@ -738,7 +770,7 @@ class MCTreeNode:
         for child_node in self.node.children:
             g = child_node.group_feature[0]
             if not g in group2node:
-                group2node[g] = []
+                group2node[g] = [child_node]
                 num_groups = num_groups + 1
             else:
                 group2node[g].append(child_node)
@@ -755,16 +787,22 @@ class MCTreeNode:
             for child in self.children:
                 child.expand()  # Recursively expand all group nodes
 
+        self.survival_children = list(range(len(self.children)))
         self.is_expanded = True
 
     # Select a node that 1. leads to a leaf node or 2. to be expanded and added
-    def select(self):
-        ucb_values = np.array([child.get_UCB(self.n) for child in self.children])
-        p = torch.tensor(np.exp(ucb_values) / np.sum(np.exp(ucb_values)))
-        return torch.multinomial(p, 1).item()                   # int(softmax(UCB))
+    def select(self) -> MCTreeNode:
+        ucb_values = []
+        for i in self.survival_children:
+            ucb_values.append(self.children[i].get_UCB(self.n))
+        ucb_array = np.array(ucb_values)
+        p = torch.tensor(np.exp(ucb_array) / np.sum(np.exp(ucb_array)))
+        child = self.children[self.survival_children[torch.multinomial(p, 1).item()]]
+        return child
 
     # Instead of roll-outs, a heuristic is used instead for evaluating the node
     #   NOTE: This method is domain-specific (related to actual tree nodes)
+    #   NOTE:   Here, the heuristic value is strictly withhin [0, 1]
     def simulate(self):
         num_releasing = 0
         num_constructive = 0
@@ -787,38 +825,90 @@ class MCTreeNode:
                     num_constructive = len(self.children)
                 elif child.group_feature[0] == 2:
                     num_mediocre = len(self.children)
-        score = 0       # TODO
-        return score
+
+        constructed = self.node.cgf_manager.num_constructed
+        to_construct = self.node.tree.num_constructive_grasp
+        progress_score =  constructed / to_construct
+
+        if num_constructive == 0:
+            if num_releasing > 0:
+                promising_score = MCTree.promising_score_release
+            elif num_mediocre > 0:
+                promising_score = MCTree.promising_score_mediocre
+            else:
+                return 0
+        else:
+            promising_score = MCTree.promising_score_constructive
+        
+        w_progress = MCTree.w_progress
+        w_future = MCTree.w_promising
+
+        return w_progress * progress_score + w_future * promising_score
 
     def backpropagate(self, Q):
         self.Q = (self.Q * self.n + Q) / (self.n + 1)
         self.n = self.n + 1
         if self.parent is not None:
+            if len(self.survival_children) <= 0:
+                parent_new_survival_children = []
+                for i in self.parent.survival_children:
+                    if not self.parent.children[i] is self:
+                        parent_new_survival_children.append(i)
+                self.parent.survival_children = parent_new_survival_children
             self.parent.backpropagate(Q)
 
 # Monte Carlo Tree Group Node
 class MCTreeGroupNode(MCTreeNode):
     def __init__(self, nodes: list[TreeNode], parent: MCTreeNode, 
                  group_level: int):
-        super.__init__(None, parent)
+        super().__init__(None, parent)
         self.nodes = nodes
         self.num_nodes = len(self.nodes)
         self.group_feature = self.nodes[0].group_feature
         self.group_level = group_level
+
+    def __str__(self):
+        return f"Type: G, GF: {self.group_feature}; Q: {self.Q}; N: {self.n}"
     
-    def get_UCB(self, N):
-        if self.n == 0:
-            return self.tree.get_fpu(self.group_feature, self.group_level)
-        return self.Q + self.tree.c * np.sqrt(np.log(N) / self.n)
+    def get_FPU(self):
+        if self.group_level == 0:
+            constructed = self.parent.node.cgf_manager.num_constructed
+            to_construct = self.parent.node.tree.num_constructive_grasp
+            progress = constructed / to_construct
+            if self.group_feature[0] == 0:                          # Releasing
+                """ Encourage Releasing First to Prepare for Constructing """
+                pseudo_Q = MCTree.w_progress * progress + \
+                    MCTree.w_promising * MCTree.promising_score_constructive
+                return pseudo_Q + MCTree.c * np.sqrt(np.log(3))
+            elif self.group_feature[0] == 1:                        # Constructive
+                """ Encourage Constructive Actions, but Weaker than Releasing """
+                pseudo_Q = MCTree.w_progress * progress + \
+                    MCTree.w_promising * MCTree.promising_score_constructive
+                return pseudo_Q
+            else:                                                   # Mediocre
+                """ Disencourage Trying Mediocre Actions """
+                return MCTree.w_promising * MCTree.promising_score_mediocre
+        else:                                                       # Grip Groups 
+            """ Encourage Trying Different Correspondence Sequence """
+            constructed = self.nodes[0].cgf_manager.num_constructed
+            to_construct = self.nodes[0].tree.num_constructive_grasp
+            progress = constructed / to_construct
+            pseudo_Q = MCTree.w_progress * progress + \
+                MCTree.w_promising * MCTree.promising_score_constructive
+            num_siblings = len(self.parent.children)
+            return pseudo_Q + MCTree.c * np.sqrt(np.log(num_siblings))
 
     # Expand to 1. more group nodes or 2. concrete nodes
     def expand(self):
         subgroup2node = {}
         num_subgroup = 0
         for node in self.nodes:
-            g = node.group_feature[self.group_level + 1]
+            if self.group_level + 1 < len(node.group_feature):
+                g = node.group_feature[self.group_level + 1]
+            else:
+                g = None
             if not g in subgroup2node:
-                subgroup2node[g] = []
+                subgroup2node[g] = [node]
                 num_subgroup = num_subgroup + 1
             else:
                 subgroup2node[g].append(node)
@@ -836,31 +926,19 @@ class MCTreeGroupNode(MCTreeNode):
             for child in self.children:
                 child.expand()                      # Recursively expand all group nodes
 
+        self.survival_children = list(range(len(self.children)))
         self.is_expanded = True
-
-    def backpropagate(self, Q):
-        if Q > self.Q:
-            self.Q = Q                              # Group maximum as group value
-        self.parent.backpropagate(Q)                # Group node must have a parent
 
 # Monte Carlo Tree
 class MCTree:
-    c = 1.4                                         # UCB Constant
-    
-    @staticmethod
-    def get_fpu(group_feature: tuple = None,        # First-play urgency
-                group_level: int = None):
-        if group_level is None:
-            return 1.0                              # Concrete Node
-        elif group_level == 0:
-            if group_feature[group_level] == 0:
-                return 50.0                         # Releasing
-            elif group_feature[group_level] == 1:
-                return 5.0                          # Constructive Grasp
-            elif group_feature[group_level] == 2:
-                return 0.1                          # Mediocre Grasp
-        elif group_level == 1:
-            return 1.0                              # Grip Group Node
+    c = np.sqrt(2)                                  # UCB Constant
+
+    w_progress = 0.6
+    w_promising = 0.4
+
+    promising_score_constructive = 1.0
+    promising_score_release = 0.5
+    promising_score_mediocre = 0.1
 
     def __init__(self, node: TreeNode):
         self.root = MCTreeNode(node, None, self)
@@ -869,8 +947,24 @@ class MCTree:
 
         self.root.expand()                          # Expand and add to tree
 
-    def get_path(self):
-        pass
+    def select(self):                               # Select a node
+        node = self.root.select()
+        while node.is_expanded:
+            new_node = node.select()
+            while new_node is None:
+                new_node = node.select()
+            node = new_node
+        return node
+
+    def search_for_goal(self):
+        while True:
+            node = self.select()
+            node.expand()
+            Q = node.simulate()
+            node.backpropagate(Q)
+
+            if self.is_goal_found:
+                return self.goal_node
 
 class CMRRP:
     def __init__(self,
@@ -911,7 +1005,8 @@ class CMRRP:
         elif method == "MCTS":
             TreeNode.mediocrity_tolerance = 9999
             TreeNode.is_grouping = True
-            mctree = MCTree(self.tree.root)
+            self.mctree = MCTree(self.tree.root)
+            node = self.mctree.search_for_goal()
 
         path = [node]
         while node.parent is not None:
