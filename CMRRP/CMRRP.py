@@ -725,6 +725,10 @@ class MCTreeNode:
         self.Q = 0.0                                                # Estimated node value
         # NOTE: If not expanded, the node is actually not added in the MCTree
         self.is_expanded = False                                    # Whether expanded
+        if self.node is self.tree.goal_node:
+            self.is_goal = True                                     # Whether is goal
+        else:
+            self.is_goal = False
 
     def __str__(self):
         return f"Type: N, GF: {self.node.group_feature}; Q: {self.Q}; N: {self.n}"
@@ -764,7 +768,7 @@ class MCTreeNode:
         goal_node = self.node.expand(1, False)
         if goal_node is not None:
             self.tree.is_goal_found = True
-            self.tree.goal_node = goal_node.extend_to_goal()
+            self.tree.goal_node = goal_node
         group2node = {}
         num_groups = 0
         for child_node in self.node.children:
@@ -796,8 +800,9 @@ class MCTreeNode:
         for i in self.survival_children:
             ucb_values.append(self.children[i].get_UCB(self.n))
         ucb_array = np.array(ucb_values)
-        p = torch.tensor(np.exp(ucb_array) / np.sum(np.exp(ucb_array)))
-        child = self.children[self.survival_children[torch.multinomial(p, 1).item()]]
+        # p = torch.tensor(np.exp(ucb_array) / np.sum(np.exp(ucb_array)))
+        # child = self.children[self.survival_children[torch.multinomial(p, 1).item()]]
+        child = self.children[self.survival_children[np.argmax(ucb_array)]]
         return child
 
     # Instead of roll-outs, a heuristic is used instead for evaluating the node
@@ -941,9 +946,9 @@ class MCTree:
     promising_score_mediocre = 0.1
 
     def __init__(self, node: TreeNode):
-        self.root = MCTreeNode(node, None, self)
         self.is_goal_found = False
         self.goal_node: TreeNode = None
+        self.root = MCTreeNode(node, None, self)
 
         self.root.expand()                          # Expand and add to tree
 
@@ -964,7 +969,7 @@ class MCTree:
             node.backpropagate(Q)
 
             if self.is_goal_found:
-                return self.goal_node
+                return self.goal_node.extend_to_goal()
 
 class CMRRP:
     def __init__(self,
