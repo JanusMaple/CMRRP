@@ -741,10 +741,16 @@ class MCTreeNode:
     def get_FPU(self):
         constructed = self.node.cgf_manager.num_constructed
         to_construct = self.node.tree.num_constructive_grasp
-        progress = constructed / to_construct
+        if self.node.g_depth > 0:
+            efficiency = constructed / self.node.g_depth
+        else:
+            efficiency = 1.0
+        progress = constructed / to_construct * efficiency
         if self.node.group_feature[0] == 0:                         # From releasing
             """ Disencourage Exploration when all in a Releasing Group """
-            return MCTree.w_promising * MCTree.promising_score_mediocre
+            pseudo_Q = MCTree.w_progress * progress + \
+                MCTree.w_promising * MCTree.promising_score_release
+            return pseudo_Q
         elif self.node.group_feature[0] == 1:                       # From constructing
             """ Encourage Exploration to Find Best Constructive Action """
             pseudo_Q = MCTree.w_progress * progress + \
@@ -753,7 +759,9 @@ class MCTreeNode:
             return pseudo_Q + MCTree.c * np.sqrt(np.log(num_siblings))
         else:                                                       # From mediocre
             """ Disencourage Exploration when all in a Mediocre Group """
-            return MCTree.w_promising * MCTree.promising_score_mediocre
+            pseudo_Q = MCTree.w_progress * progress + \
+                MCTree.w_promising * MCTree.promising_score_mediocre
+            return pseudo_Q
 
     # N: Number of times that the parent of self has been selected
     def get_UCB(self, N):
@@ -833,7 +841,11 @@ class MCTreeNode:
 
         constructed = self.node.cgf_manager.num_constructed
         to_construct = self.node.tree.num_constructive_grasp
-        progress_score =  constructed / to_construct
+        if self.node.g_depth > 0:
+            efficiency = constructed / self.node.g_depth
+        else:
+            efficiency = 1.0
+        progress_score =  constructed / to_construct * efficiency
 
         if num_constructive == 0:
             if num_releasing > 0:
@@ -876,10 +888,14 @@ class MCTreeGroupNode(MCTreeNode):
         return f"Type: G, GF: {self.group_feature}; Q: {self.Q}; N: {self.n}"
     
     def get_FPU(self):
+        constructed = self.nodes[0].cgf_manager.num_constructed
+        to_construct = self.nodes[0].tree.num_constructive_grasp
+        if self.nodes[0].g_depth > 0:
+            efficiency = constructed / self.nodes[0].g_depth
+        else:
+            efficiency = 1.0
+        progress = constructed / to_construct * efficiency
         if self.group_level == 0:
-            constructed = self.parent.node.cgf_manager.num_constructed
-            to_construct = self.parent.node.tree.num_constructive_grasp
-            progress = constructed / to_construct
             if self.group_feature[0] == 0:                          # Releasing
                 """ Encourage Releasing First to Prepare for Constructing """
                 pseudo_Q = MCTree.w_progress * progress + \
@@ -895,13 +911,19 @@ class MCTreeGroupNode(MCTreeNode):
                 return MCTree.w_promising * MCTree.promising_score_mediocre
         else:                                                       # Grip Groups 
             """ Encourage Trying Different Correspondence Sequence """
-            constructed = self.nodes[0].cgf_manager.num_constructed
-            to_construct = self.nodes[0].tree.num_constructive_grasp
-            progress = constructed / to_construct
             pseudo_Q = MCTree.w_progress * progress + \
                 MCTree.w_promising * MCTree.promising_score_constructive
-            num_siblings = len(self.parent.children)
-            return pseudo_Q + MCTree.c * np.sqrt(np.log(num_siblings))
+            return pseudo_Q + MCTree.c * np.sqrt(np.log(self.parent.n + 1))
+        
+    # Get the number of concrete nodes within this group node
+    def get_num_nodes(self):
+        num = 0
+        for child in self.children:
+            if isinstance(child, MCTreeGroupNode):
+                num = num + child.get_num_nodes()
+            else:
+                num = num + 1
+        return num
 
     # Expand to 1. more group nodes or 2. concrete nodes
     def expand(self):
@@ -936,13 +958,13 @@ class MCTreeGroupNode(MCTreeNode):
 
 # Monte Carlo Tree
 class MCTree:
-    c = np.sqrt(2)                                  # UCB Constant
+    c = 0.2                                         # UCB Constant
 
-    w_progress = 0.6
-    w_promising = 0.4
+    w_progress = 0.4
+    w_promising = 0.7
 
     promising_score_constructive = 1.0
-    promising_score_release = 0.5
+    promising_score_release = 0.6
     promising_score_mediocre = 0.1
 
     def __init__(self, node: TreeNode):
