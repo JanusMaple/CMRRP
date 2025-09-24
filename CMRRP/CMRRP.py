@@ -808,8 +808,6 @@ class MCTreeNode:
         for i in self.survival_children:
             ucb_values.append(self.children[i].get_UCB(self.n))
         ucb_array = np.array(ucb_values)
-        # p = torch.tensor(np.exp(ucb_array) / np.sum(np.exp(ucb_array)))
-        # child = self.children[self.survival_children[torch.multinomial(p, 1).item()]]
         child = self.children[self.survival_children[np.argmax(ucb_array)]]
         return child
 
@@ -914,16 +912,6 @@ class MCTreeGroupNode(MCTreeNode):
             pseudo_Q = MCTree.w_progress * progress + \
                 MCTree.w_promising * MCTree.promising_score_constructive
             return pseudo_Q + MCTree.c * np.sqrt(np.log(self.parent.n + 1))
-        
-    # Get the number of concrete nodes within this group node
-    def get_num_nodes(self):
-        num = 0
-        for child in self.children:
-            if isinstance(child, MCTreeGroupNode):
-                num = num + child.get_num_nodes()
-            else:
-                num = num + 1
-        return num
 
     # Expand to 1. more group nodes or 2. concrete nodes
     def expand(self):
