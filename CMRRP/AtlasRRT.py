@@ -155,6 +155,7 @@ class Chart:
         if self.k <= 0:
             return torch.zeros(0, device=self.device, requires_grad=True)
         z = torch.randn(self.k, device=self.device, requires_grad=True)
+        z = z + torch.sign(z) * torch.randn(self.k, device=self.device).pow(2.0)
         r = Chart.rho_s * torch.rand(1, device=self.device).pow(1.0 / self.k)
         u = r * z / z.norm()
         return u
