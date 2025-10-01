@@ -173,7 +173,7 @@ class CGFManager:
         idxes = self.get_angle_idxes(emt_new_gf, emt_new_gt, False)
         for idx in idxes:
             gamma = -self.Gamma_final[idx][0]
-            built_grip = self.Gamma_final[idx][1] // 3
+            built_grip = self.Gamma_final[idx][5]
             key = (gamma, built_grip)
             if not key in cursed_choices:
                 cursed_choices[key] = []
@@ -181,7 +181,7 @@ class CGFManager:
         idxes = self.get_angle_idxes(emt_new_gt, emt_new_gf, False)
         for idx in idxes:
             gamma = self.Gamma_final[idx][0]
-            built_grip = self.Gamma_final[idx][1] // 3
+            built_grip = self.Gamma_final[idx][5]
             key = (gamma, built_grip)
             if not key in cursed_choices:
                 cursed_choices[key] = []
@@ -194,7 +194,7 @@ class CGFManager:
                     gamma = -np.pi - gamma_0 - self.Gamma_final[idx][0]
                 else:
                     gamma = np.pi - gamma_0 - self.Gamma_final[idx][0]
-                built_grip = self.Gamma_final[idx][1] // 3
+                built_grip = self.Gamma_final[idx][5]
                 key = (gamma, built_grip)
                 if not key in cursed_choices:
                     cursed_choices[key] = []
@@ -205,7 +205,7 @@ class CGFManager:
                     gamma = np.pi - gamma_0 - (-self.Gamma_final[idx][0])
                 else:
                     gamma = -np.pi - gamma_0 - (-self.Gamma_final[idx][0])
-                built_grip = self.Gamma_final[idx][1] // 3
+                built_grip = self.Gamma_final[idx][5]
                 key = (gamma, built_grip)
                 if not key in cursed_choices:
                     cursed_choices[key] = []
@@ -334,7 +334,7 @@ class TreeNode:
                                 child_group_feature = None
                             else:
                                 # The grip that is being constructed by this action
-                                built_grip = new_cgf_manager.correspondence[gf] // 3
+                                built_grip = new_cgf_manager.Gamma_final[idx][5]
                                 child_group_feature = (1, built_grip)
                             new_node = TreeNode(new_gmrc, new_cgf_manager,
                                         self, self.g_depth + 1, 0,
@@ -432,7 +432,7 @@ class TreeNode:
                         if not TreeNode.is_grouping:
                             child_group_feature = None
                         else:
-                            built_grip = bc_cgf_manager.correspondence[gf] // 3
+                            built_grip = bc_cgf_manager.Gamma_final[idx][5]
                             child_group_feature = (1, built_grip)
                         bc_node = TreeNode(bc_gmrc, bc_cgf_manager,
                                            self, self.g_depth + 1, 0,
@@ -520,7 +520,7 @@ class TreeNode:
                     child_group_feature = None
                 else:
                     # The grip that is being constructed by this action
-                    built_grip = bc_cgf_manager.correspondence[gf] // 3
+                    built_grip = bc_cgf_manager.Gamma_final[idx][5]
                     child_group_feature = (1, built_grip)
                 bc_node = TreeNode(bc_gmrc, bc_cgf_manager,
                                 self, self.g_depth + 1, 0,
@@ -529,7 +529,6 @@ class TreeNode:
                     members.append(bc_node)
                 if bc_node.is_goal():
                     break
-
         return members
 
 class Tree:

@@ -919,43 +919,43 @@ class GMRC(EMRC):
 
     # Get set \Gamma_{final} for discretizing grasping angle choices
     def get_Gamma_final(self):
-        Gamma_final = []        # List of tuples: (ang, g1, g2, index, is_w_grip)
+        Gamma_final = []    # List of tuples: (ang, g1, g2, index, is_w_grip, grip)
 
         for grip in range(self.w + self.v):
             if self.is_grip_w[grip]:
                 Gamma_final.append((self.grsp_angs[3 * grip],
                                    self.gripper2module[3 * grip + 1],
                                    self.gripper2module[3 * grip],
-                                   0, True))
+                                   0, True, grip))
                 Gamma_final.append((-self.grsp_angs[3 * grip],
                                    self.gripper2module[3 * grip],
                                    self.gripper2module[3 * grip + 1],
-                                   1, True))
+                                   1, True, grip))
                 Gamma_final.append((self.grsp_angs[3 * grip + 1],
                                    self.gripper2module[3 * grip + 2],
                                    self.gripper2module[3 * grip + 1],
-                                   2, True))
+                                   2, True, grip))
                 Gamma_final.append((-self.grsp_angs[3 * grip + 1],
                                    self.gripper2module[3 * grip + 1],
                                    self.gripper2module[3 * grip + 2],
-                                   3, True))
+                                   3, True, grip))
                 Gamma_final.append((self.grsp_angs[3 * grip + 2],
                                    self.gripper2module[3 * grip],
                                    self.gripper2module[3 * grip + 2],
-                                   4, True))
+                                   4, True, grip))
                 Gamma_final.append((-self.grsp_angs[3 * grip + 2],
                                    self.gripper2module[3 * grip + 2],
                                    self.gripper2module[3 * grip],
-                                   5, True))
+                                   5, True, grip))
             else:
                 Gamma_final.append((self.grsp_angs[3 * grip],
                                    self.gripper2module[3 * grip + 1],
                                    self.gripper2module[3 * grip],
-                                   0, False))
+                                   0, False, grip))
                 Gamma_final.append((-self.grsp_angs[3 * grip],
                                    self.gripper2module[3 * grip],
                                    self.gripper2module[3 * grip + 1],
-                                   1, False))
+                                   1, False, grip))
 
         return Gamma_final
     
