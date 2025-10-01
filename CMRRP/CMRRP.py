@@ -39,7 +39,8 @@ class CGFManager:
     def __init__(self, Gamma_final: list, survival_idx: list = None, 
                  correspondence: list = None, num_constructed: int = 0,
                  gf_idx_list: list = None, gt_idx_list: list = None, 
-                 can_release = None, is_cursed = False, curse = None):
+                 can_release = None, is_cursed = False, curse = None,
+                 built_grip_parity = 0):
         self.Gamma_final = Gamma_final
         
         if survival_idx is None: 
@@ -79,6 +80,9 @@ class CGFManager:
         self.gf_idx_list = gf_idx_list      # If chosen as gf, what angle can it choose
         self.gt_idx_list = gt_idx_list      # If chosen as gt, what angle can it choose
 
+        # A hash value for documenting which grips have been reconstructed
+        self.built_grip_parity = built_grip_parity
+
     # Collect an angle given Gamma_final index, and build correspondence based on it
     def get_angle(self, new_gf, new_gt, index):
         self.can_release[new_gf] = False
@@ -115,6 +119,7 @@ class CGFManager:
             self.gf_idx_list[gt] = []
             self.gt_idx_list[gt] = []
             self.gt_idx_list[gf] = []
+            self.built_grip_parity = self.built_grip_parity + pow(2, gf // 3)
         else:
             # For w-grip in Gamma_final:
             #   [..., gamma_1, -gamma_1, gamma_2, -gamma_2, gamma_3, -gamma_3, ...]
@@ -125,21 +130,30 @@ class CGFManager:
                 # -gamma_1 => -gamma_3; -gamma_2 => -gamma_1; -gamma_3 => -gamma_2
                 keep_idx = (index - bias_index) + (bias_index + 4) % 6
             new_survival_idx = []
+            w_grip_constructed = True
             for idx in self.survival_idx:
                 if not (idx >= index - bias_index and idx < index - bias_index + 6):
                     new_survival_idx.append(idx)
                 elif idx == keep_idx:
+                    w_grip_constructed = False          # Survivor indicates uncompleted
                     new_survival_idx.append(idx)
             self.survival_idx = new_survival_idx
-            for gt_idxes in self.gt_idx_list:
-                for i in range(len(gt_idxes)):
-                    if gt_idxes[i] == keep_idx:
-                        gt_idxes[i : i + 1] = []    # Purge keep_idx first
-                        break
-            self.gf_idx_list[gf] = []           # gf can no longer grasp any gripper
-            self.gf_idx_list[gt] = []           # gt can no longer grasp any gripper
-            self.gt_idx_list[gt] = []           # gt can no longer be grasper
-            self.gt_idx_list[gf] = [keep_idx]   # gf can only be grasped with keep_idx
+            if not w_grip_constructed:
+                for gt_idxes in self.gt_idx_list:
+                    for i in range(len(gt_idxes)):
+                        if gt_idxes[i] == keep_idx:
+                            gt_idxes[i : i + 1] = []    # Purge keep_idx first
+                            break
+                self.gf_idx_list[gf] = []           # gf can no longer grasp any gripper
+                self.gf_idx_list[gt] = []           # gt can no longer grasp any gripper
+                self.gt_idx_list[gt] = []           # gt can no longer be grasped
+                self.gt_idx_list[gf] = [keep_idx]   # gf can be grasped with keep_idx
+            else:
+                self.gf_idx_list[gf] = []           # gf can no longer grasp any gripper
+                self.gf_idx_list[gt] = []           # gt can no longer grasp any gripper
+                self.gt_idx_list[gt] = []           # gt can no longer be grasped
+                self.gt_idx_list[gf] = []           # gf can no longer be grasped
+                self.built_grip_parity = self.built_grip_parity + pow(2, gf // 3)
             
         return angle
 
@@ -245,7 +259,8 @@ class CGFManager:
                           gt_idx_list=copy.deepcopy(self.gt_idx_list),
                           can_release=copy.deepcopy(self.can_release),
                           is_cursed=self.is_cursed,
-                          curse=copy.deepcopy(self.curse))
+                          curse=copy.deepcopy(self.curse),
+                          built_grip_parity=self.built_grip_parity)
 
 # Parallel Optimizer for Grasping/Modifying of GMRC
 class ParOptimizer:
