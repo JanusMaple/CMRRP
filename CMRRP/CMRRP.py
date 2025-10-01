@@ -119,7 +119,8 @@ class CGFManager:
             self.gf_idx_list[gt] = []
             self.gt_idx_list[gt] = []
             self.gt_idx_list[gf] = []
-            self.built_grip_parity = self.built_grip_parity + pow(2, gf // 3)
+            grip = self.Gamma_final[index][5]
+            self.built_grip_parity = self.built_grip_parity + pow(2, grip)
         else:
             # For w-grip in Gamma_final:
             #   [..., gamma_1, -gamma_1, gamma_2, -gamma_2, gamma_3, -gamma_3, ...]
@@ -153,7 +154,8 @@ class CGFManager:
                 self.gf_idx_list[gt] = []           # gt can no longer grasp any gripper
                 self.gt_idx_list[gt] = []           # gt can no longer be grasped
                 self.gt_idx_list[gf] = []           # gf can no longer be grasped
-                self.built_grip_parity = self.built_grip_parity + pow(2, gf // 3)
+                grip = self.Gamma_final[index][5]
+                self.built_grip_parity = self.built_grip_parity + pow(2, grip)
             
         return angle
 
@@ -509,18 +511,6 @@ class TreeNode:
             grand_child = child.expand_to(tar_depth, is_g_depth, cur_depth + 1)
             if grand_child is not None:                         # Early Stop
                 return grand_child
-            
-        # TODO: TO delete:
-        # if self.g_depth == 3 and self.parent.group_feature[0] == 0:
-        #     self.gmrc.show_geometry()
-        #     node = self
-        #     while node is not None:
-        #         node.gmrc.print_all_angs()
-        #         node = node.parent
-        #     print(self.gmrc.gripper2module)
-        #     print(self.cgf_manager.can_release)
-        #     raise RuntimeError("aaa")
-        #     print("--------------")
 
         return None
 
@@ -930,7 +920,7 @@ class IDVerdict:
         grsp_ang_parity = int(np.sum(np.abs(gmrc.grsp_angs)) / np.pi * 180)
 
         if IDVerdict.strict_mode:
-            return (graph_feat, (grsp_ang_parity, cgf_manager.built_grip_parity))
+            return (graph_feat, (grsp_ang_parity, int(cgf_manager.built_grip_parity)))
         else:
             return (graph_feat, grsp_ang_parity)
 
@@ -1253,7 +1243,7 @@ class CMRRP:
                     IDVerdict.strict_mode = True
                 target_angles[ang] = grip
         if IDVerdict.strict_mode:
-            print("Detected Duplicated Angles, Turning on IDVerict Strict Mode")
+            print("\033[95mDetected Duplicated Angles, Turning on IDVerict Strict Mode\033[0m")
 
         if method == "BFS":
             TreeNode.is_grouping = False
