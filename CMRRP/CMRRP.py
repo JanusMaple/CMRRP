@@ -782,7 +782,16 @@ class Tree:
         return False
 
     def add_node_to_depth(self, node: TreeNode):
-        if not node.cgf_manager.is_cursed:
+        skip = False
+        temp = node
+        while temp is not None:
+            if temp.cgf_manager.is_cursed:
+                skip = True
+                break
+            if temp.g_depth < node.g_depth:
+                break
+            temp = temp.parent
+        if not skip:                    # Skip cursed or new-relieved-from-curse nodes
             node_id, ethnicity = node.get_id_ethnicity()
             if not ethnicity in self.ethinicity2id:
                 self.ethinicity2id[ethnicity] = [node_id]
