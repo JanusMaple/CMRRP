@@ -7,7 +7,7 @@ import sys
 sys.path.append('..')
 sys.path.append('../GENN')
 sys.path.append('../GGNN')
-import os, signal, multiprocessing as mp
+import os, multiprocessing as mp
 import copy
 import warnings
 from concurrent.futures import ProcessPoolExecutor
@@ -131,6 +131,11 @@ class CGFManager:
                 elif idx == keep_idx:
                     new_survival_idx.append(idx)
             self.survival_idx = new_survival_idx
+            for gt_idxes in self.gt_idx_list:
+                for i in range(len(gt_idxes)):
+                    if gt_idxes[i] == keep_idx:
+                        gt_idxes[i : i + 1] = []    # Purge keep_idx first
+                        break
             self.gf_idx_list[gf] = []           # gf can no longer grasp any gripper
             self.gf_idx_list[gt] = []           # gt can no longer grasp any gripper
             self.gt_idx_list[gt] = []           # gt can no longer be grasper
@@ -758,8 +763,6 @@ class Tree:
                         tree = self,
                         group_feature = child_group_feature)
 
-        self.target_id, _ = self.id_verdict.get_id_ethnicity(tar_gmrc)
-
     # Decide whether a GMRC shape has been reached by the tree or not
     def is_duplicated_gmrc(self, gmrc: GMRC):
         gmrc_id, ethnicity = self.id_verdict.get_id_ethnicity(gmrc)
@@ -888,7 +891,7 @@ class IDVerdict:
         self.device = device
 
     # Get the identifier (hash value) using GGNN
-    def get_id_ethnicity(self, gmrc):
+    def get_id_ethnicity(self, gmrc: GMRC):
         x, edge_index, cyclic_neighbors, neighbor_phis, neighbor_num = \
             gmrc.get_representation()
         with torch.inference_mode():
