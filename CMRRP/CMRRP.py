@@ -504,7 +504,6 @@ class TreeNode:
         if not release_only:
             self.expanded = True
 
-        self.children.reverse()
         for child in self.children:
             if child.is_goal():
                 return child
@@ -718,7 +717,7 @@ class TreeNode:
                 else:
                     # The grip that is being constructed by this action
                     built_grip = choice[0][1]
-                    child_group_feature = (1, built_grip)
+                    child_group_feature = (3, built_grip)
                 ss_node = TreeNode(mdf_gmrc, ss_cgf_manager,
                                    node, node.g_depth + 1, 0,
                                    node.tree, child_group_feature)
@@ -978,7 +977,7 @@ class MCTreeNode:
             efficiency = 1.0
         progress = constructed / to_construct * efficiency
         if self.node.group_feature[0] == 0:                         # From releasing
-            """ Disencourage Exploration when all in a Releasing Group """
+            """ Discourage Exploration when all in a Releasing Group """
             pseudo_Q = MCTree.w_progress * progress + \
                 MCTree.w_promising * MCTree.promising_score_release
             return pseudo_Q
@@ -986,10 +985,16 @@ class MCTreeNode:
             """ Encourage Exploration to Find Best Constructive Action """
             pseudo_Q = MCTree.w_progress * progress + \
                 MCTree.w_promising * MCTree.promising_score_constructive
-            num_siblings = len(self.parent.children)
-            return pseudo_Q + MCTree.c * np.sqrt(np.log(num_siblings))
+            pseudo_n = to_construct - constructed + 1
+            return pseudo_Q + MCTree.c * np.sqrt(np.log(pseudo_n)/pseudo_n)
+        elif self.node.group_feature[0] == 3:                       # From Curse
+            """Encourage Exploration to Find Best Stepping-Stone (Cursed) Action"""
+            pseudo_Q = MCTree.w_progress * progress + \
+                MCTree.w_promising * MCTree.promising_score_constructive
+            pseudo_n = to_construct - constructed + 1
+            return pseudo_Q + MCTree.c * np.sqrt(np.log(pseudo_n)/pseudo_n)
         else:                                                       # From mediocre
-            """ Disencourage Exploration when all in a Mediocre Group """
+            """ Discourage Exploration when all in a Mediocre Group """
             pseudo_Q = MCTree.w_progress * progress + \
                 MCTree.w_promising * MCTree.promising_score_mediocre
             return pseudo_Q
@@ -1048,6 +1053,7 @@ class MCTreeNode:
     def simulate(self):
         num_releasing = 0
         num_constructive = 0
+        num_curse = 0
         num_mediocre = 0
         if len(self.children) == 0:
             return 0
@@ -1058,15 +1064,19 @@ class MCTreeNode:
                 num_constructive = len(self.children)
             elif self.children[0].node.group_feature[0] == 2:
                 num_mediocre = len(self.children)
+            elif self.children[0].node.group_feature[0] == 3:
+                num_curse = len(self.children)
         else:
             for child in self.children:
                 assert isinstance(child, MCTreeGroupNode)
                 if child.group_feature[0] == 0:
-                    num_releasing = len(self.children)
+                    num_releasing = len(child.nodes)
                 elif child.group_feature[0] == 1:
-                    num_constructive = len(self.children)
+                    num_constructive = len(child.nodes)
                 elif child.group_feature[0] == 2:
-                    num_mediocre = len(self.children)
+                    num_mediocre = len(child.nodes)
+                elif child.group_feature[0] == 3:
+                    num_curse = len(child.nodes)
 
         constructed = self.node.cgf_manager.num_constructed
         to_construct = self.node.tree.num_constructive_grasp
@@ -1079,6 +1089,8 @@ class MCTreeNode:
         if num_constructive == 0:
             if num_releasing > 0:
                 promising_score = MCTree.promising_score_release
+            elif num_curse > 0:
+                promising_score = MCTree.promising_score_curse
             elif num_mediocre > 0:
                 promising_score = MCTree.promising_score_mediocre
             else:
@@ -1135,8 +1147,13 @@ class MCTreeGroupNode(MCTreeNode):
                 pseudo_Q = MCTree.w_progress * progress + \
                     MCTree.w_promising * MCTree.promising_score_constructive
                 return pseudo_Q
+            elif self.group_feature[0] == 3:
+                """Discourage Trying Cursed Actions"""              # Cursed
+                pseudo_Q = MCTree.w_progress * progress + \
+                    MCTree.w_promising * MCTree.promising_score_curse
+                return pseudo_Q
             else:                                                   # Mediocre
-                """ Disencourage Trying Mediocre Actions """
+                """ Discourage Trying Mediocre Actions """
                 return MCTree.w_promising * MCTree.promising_score_mediocre
         else:                                                       # Grip Groups 
             """ Encourage Trying Different Correspondence Sequence """
@@ -1179,11 +1196,12 @@ class MCTreeGroupNode(MCTreeNode):
 class MCTree:
     c = 0.2                                         # UCB Constant
 
-    w_progress = 0.4
+    w_progress = 0.3
     w_promising = 0.7
 
     promising_score_constructive = 1.0
-    promising_score_release = 0.6
+    promising_score_release = 0.7
+    promising_score_curse = 0.4
     promising_score_mediocre = 0.1
 
     def __init__(self, node: TreeNode):
@@ -1235,10 +1253,7 @@ class CMRRP:
     def plan(self, gmrc_1: GMRC, gmrc_2: GMRC, method = "BFS"):
         GMRC.suppress_action_err = True
         assert gmrc_1.m == gmrc_2.m
-        CGFManager.m = gmrc_1.m
-        cgf_manager = CGFManager(gmrc_2.get_Gamma_final())
-        self.tree = Tree(gmrc_1, cgf_manager, gmrc_2, self.ed_estimator, self.id_verdict)
-        
+
         IDVerdict.strict_mode = False
         target_angles = dict()
         for grip in range(len(gmrc_2.grippers) // 3):
@@ -1253,6 +1268,10 @@ class CMRRP:
                 target_angles[ang] = grip
         if IDVerdict.strict_mode:
             print("\033[95mDetected Duplicated Angles, Turning on IDVerict Strict Mode\033[0m")
+
+        CGFManager.m = gmrc_1.m
+        cgf_manager = CGFManager(gmrc_2.get_Gamma_final())
+        self.tree = Tree(gmrc_1, cgf_manager, gmrc_2, self.ed_estimator, self.id_verdict)
 
         if method == "BFS":
             TreeNode.is_grouping = False
