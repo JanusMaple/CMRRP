@@ -431,7 +431,8 @@ class TreeNode:
     # Get both node identifier and its ethnicity (based on grsp_ang parity)
     def get_id_ethnicity(self):
         if self.id_ethnicity is None:
-            self.id_ethnicity = self.tree.id_verdict.get_id_ethnicity(self.gmrc)
+            self.id_ethnicity = self.tree.id_verdict.get_id_ethnicity(
+                self.gmrc, self.cgf_manager)
         return self.id_ethnicity
         
     def expand_to(self, tar_depth = None, is_g_depth = True, cur_depth = 0):
@@ -695,9 +696,11 @@ class TreeNode:
                 if isinstance(choice, tuple):
                     ang = choice[0][0]
                 else:
-                    ang = node.cgf_manager.Gamma_final[choice][0]
+                    temp_cgf_manager = node.cgf_manager.copy()
+                    ang = temp_cgf_manager.get_angle(gf, gt, choice)
                     mid_gmrc.modify_ang_forcibly(ang, grip)
-                    if node.tree.is_duplicated_gmrc(mid_gmrc):
+                    if node.tree.is_duplicated_gmrc(mid_gmrc,
+                                                    temp_cgf_manager):
                         ang = np.inf
                     mid_gmrc.restore_grsp_ang()
                 if ang >= min_ang and ang <= max_ang:
@@ -779,8 +782,8 @@ class Tree:
                         group_feature = child_group_feature)
 
     # Decide whether a GMRC shape has been reached by the tree or not
-    def is_duplicated_gmrc(self, gmrc: GMRC):
-        gmrc_id, ethnicity = self.id_verdict.get_id_ethnicity(gmrc)
+    def is_duplicated_gmrc(self, gmrc: GMRC, cgf_manager: CGFManager):
+        gmrc_id, ethnicity = self.id_verdict.get_id_ethnicity(gmrc, cgf_manager)
         if not ethnicity in self.ethinicity2id:
             return False
         for id in self.ethinicity2id[ethnicity]:
@@ -893,6 +896,7 @@ class EDEstimator:
 
 # Identity Verdict
 class IDVerdict:
+    strict_mode = False
     thd = 1e-7
 
     def __init__(self,
@@ -906,7 +910,7 @@ class IDVerdict:
         self.device = device
 
     # Get the identifier (hash value) using GGNN
-    def get_id_ethnicity(self, gmrc: GMRC):
+    def get_id_ethnicity(self, gmrc: GMRC, cgf_manager: CGFManager):
         x, edge_index, cyclic_neighbors, neighbor_phis, neighbor_num = \
             gmrc.get_representation()
         with torch.inference_mode():
@@ -925,7 +929,10 @@ class IDVerdict:
 
         grsp_ang_parity = int(np.sum(np.abs(gmrc.grsp_angs)) / np.pi * 180)
 
-        return (graph_feat, grsp_ang_parity)
+        if IDVerdict.strict_mode:
+            return (graph_feat, (grsp_ang_parity, cgf_manager.built_grip_parity))
+        else:
+            return (graph_feat, grsp_ang_parity)
 
     def is_identical(self, id_1: torch.tensor, id_2: torch.tensor):
         graph_feat_diff = id_1 - id_2
@@ -1232,6 +1239,21 @@ class CMRRP:
         CGFManager.m = gmrc_1.m
         cgf_manager = CGFManager(gmrc_2.get_Gamma_final())
         self.tree = Tree(gmrc_1, cgf_manager, gmrc_2, self.ed_estimator, self.id_verdict)
+        
+        IDVerdict.strict_mode = False
+        target_angles = dict()
+        for grip in range(len(gmrc_2.grippers) // 3):
+            if gmrc_2.is_grip_w[grip]:
+                gpr_list = [grip * 3, grip * 3 + 1, grip * 3 + 2]
+            else:
+                gpr_list = [grip * 3]
+            for gpr in gpr_list:
+                ang = int(1e2 * np.abs(gmrc_2.grsp_angs[gpr] / np.pi * 180))
+                if ang in target_angles and not target_angles[ang] == grip:
+                    IDVerdict.strict_mode = True
+                target_angles[ang] = grip
+        if IDVerdict.strict_mode:
+            print("Detected Duplicated Angles, Turning on IDVerict Strict Mode")
 
         if method == "BFS":
             TreeNode.is_grouping = False
