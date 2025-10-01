@@ -7,11 +7,15 @@ import sys
 sys.path.append('..')
 sys.path.append('../GENN')
 sys.path.append('../GGNN')
+import os, signal, multiprocessing as mp
 import copy
 import warnings
+from concurrent.futures import ProcessPoolExecutor
+from concurrent.futures.process import BrokenProcessPool
+from itertools import repeat
+import numpy as np
 import torch
 import torch.nn.functional as F
-import numpy as np
 from GMRC import GMRC
 from EMRC import EMRC
 import GENN, GGNN
@@ -238,10 +242,143 @@ class CGFManager:
                           is_cursed=self.is_cursed,
                           curse=copy.deepcopy(self.curse))
 
+# Parallel Optimizer for Grasping/Modifying of GMRC
+class ParOptimizer:
+    pool = None
+
+    """
+    Dock the gmrc by action naturally, and then find min/max grasp angle
+    NOTE: Inputs and outputs are automatically pickled and copied
+    Return: (natural_gmrc, (min_gmrc, min_ang), (max_gmrc, max_ang))
+    """
+    @staticmethod
+    def dock_min_max(gmrc: GMRC, action: tuple):
+        if not gmrc.execute_action(action):
+            return (None, (None, None), (None, None))
+        if gmrc.is_2_cycle(-1):
+            return (gmrc, (None, None), (None, None))
+        
+        mid_gmrc = gmrc
+        gf = action[0]
+        grip = mid_gmrc.module2gripper[gf % 2][gf // 2] // 3
+        mid_ang = mid_gmrc.get_grip_gamma(grip)
+        
+        min_gmrc = gmrc.copy()
+        if not min_gmrc.modify_grsp_ang(grip, -GMRC.grsp_ang_cap):
+            min_ang = mid_ang
+            min_gmrc = None
+        else:
+            min_ang = min_gmrc.get_grip_gamma(grip)
+            if min_ang >= mid_ang:
+                min_gmrc = None
+
+        max_gmrc = gmrc.copy()
+        if not max_gmrc.modify_grsp_ang(grip, GMRC.grsp_ang_cap):
+            max_ang = mid_ang
+            max_gmrc = None
+        else:
+            max_ang = max_gmrc.get_grip_gamma(grip)
+            if max_ang <= mid_ang:
+                max_gmrc = None
+
+        return (mid_gmrc, (min_gmrc, min_ang), (max_gmrc, max_ang))
+    
+    """
+    Modify the angles of GMRCs and return the results
+    NOTE: Inputs and outputs are automatically pickled and copied
+    Returen: [modified_gmrc, ..., modified_gmrc]
+    """
+    @staticmethod
+    def modify(gmrcs: list[GMRC], grips: list[int], angs: list[float]):
+        modified_gmrcs = []
+        for gmrc, grip, ang in zip(gmrcs, grips, angs):
+            if not gmrc.modify_grsp_ang(grip, ang):
+                modified_gmrcs.append(None)
+                continue
+            modified_ang = gmrc.get_grip_gamma(grip)
+            if np.abs(modified_ang - ang) > 1e-3:
+                modified_gmrcs.append(None)
+                continue
+            modified_gmrcs.append(gmrc)
+        return modified_gmrcs
+
+    @staticmethod
+    def par_dock_min_max(gmrcs: list[GMRC], actions: list[tuple], max_workers: int):
+        ParOptimizer.ensure_pool(max_workers)
+        try:
+            gmrcs = ParOptimizer.pool.map(ParOptimizer.dock_min_max, gmrcs, actions)
+            return gmrcs
+        except KeyboardInterrupt:
+            ParOptimizer.reset_pool()
+            raise
+        except BrokenProcessPool:
+            ParOptimizer.reset_pool()
+            raise
+
+    @staticmethod
+    def par_modify(gmrcs: list[GMRC], grips: list[int],
+                   angs: list[float], max_workers: int):
+        ParOptimizer.ensure_pool(max_workers)
+        try:
+            num_atomic_tasks = len(angs)
+            chunk_size = num_atomic_tasks // max_workers + 1
+            gmrc_chunks = []
+            grip_chunks = []
+            ang_chunks = []
+            num_assigned = 0
+            while num_assigned < num_atomic_tasks:
+                gmrc_chunks.append(gmrcs[num_assigned : num_assigned + chunk_size])
+                grip_chunks.append(grips[num_assigned : num_assigned + chunk_size])
+                ang_chunks.append(angs[num_assigned : num_assigned + chunk_size])
+                num_assigned = num_assigned + chunk_size
+            modified_gmrc_chunks = ParOptimizer.pool.map(
+                ParOptimizer.modify, gmrc_chunks, grip_chunks, ang_chunks)
+            modified_gmrcs = []
+            for modified_gmrc_chunk in modified_gmrc_chunks:
+                modified_gmrcs.extend(modified_gmrc_chunk)
+            return modified_gmrcs
+        except KeyboardInterrupt:
+            ParOptimizer.reset_pool()
+            raise
+        except BrokenProcessPool:
+            ParOptimizer.reset_pool()
+            raise
+
+    @staticmethod
+    def _init_worker():
+        GMRC.suppress_action_err = True
+        os.environ.setdefault("OMP_NUM_THREADS", "1")
+        os.environ.setdefault("MKL_NUM_THREADS", "1")
+        torch.set_num_threads(1)
+        torch.set_num_interop_threads(1)
+
+    @staticmethod
+    def make_pool(max_workers):
+        return ProcessPoolExecutor(
+            max_workers=max_workers,
+            mp_context=mp.get_context("spawn"),
+            initializer=ParOptimizer._init_worker
+        )
+
+    @staticmethod
+    def ensure_pool(max_workers):
+        if ParOptimizer.pool is None:
+            ParOptimizer.pool = ParOptimizer.make_pool(max_workers)
+
+    @staticmethod
+    def reset_pool():
+        if ParOptimizer.pool is not None:
+            try:
+                ParOptimizer.pool.shutdown(wait=False, cancel_futures=True)
+            except Exception:
+                pass
+        ParOptimizer.pool = None
+
 # A search tree node contains: 1. a unique gmrc shape; 2. a partial correspondence
 class TreeNode:
     mediocrity_tolerance = 0
     is_grouping = False
+    max_workers = 12
 
     def __init__(self, gmrc: GMRC, cgf_manager: CGFManager, 
                  parent: TreeNode = None, g_depth: int = 0,
@@ -292,29 +429,21 @@ class TreeNode:
                 else:
                     release_only = False
             
-        if self.mediocrity > TreeNode.mediocrity_tolerance:
+        if self.mediocrity > TreeNode.mediocrity_tolerance:     # Too Mediocre
             return None
         
         if not self.expanded:
+            release_actions = []
+            grasp_actions = []
             if self.actions is None:
                 self.actions = self.gmrc.get_all_actions()
             for action in self.actions:
-                new_gmrc = self.gmrc.copy()
                 if not isinstance(action, tuple):               # Release
                     if self.release_expanded:
                         continue
                     if not self.cgf_manager.can_release[action]:
                         continue
-                    new_gmrc.execute_action(action)
-                    if not TreeNode.is_grouping:
-                        child_group_feature = None
-                    else:
-                        child_group_feature = (0, 0)
-                    new_node = TreeNode(new_gmrc, self.cgf_manager.copy(),
-                                        self, self.g_depth, self.mediocrity,
-                                        self.tree, child_group_feature)
-                    if new_node.is_novel:
-                        self.children.append(new_node)
+                    release_actions.append(action)
                 else:                                           # Grasp
                     if release_only:
                         continue
@@ -325,27 +454,28 @@ class TreeNode:
                             idx = curse_action[2]
                             if not (gf == action[0] and gt == action[1]):
                                 continue
-                            if not new_gmrc.execute_action(action):
-                                continue
-                            new_cgf_manager = self.cgf_manager.copy()
-                            new_cgf_manager.break_curse()
-                            new_cgf_manager.get_angle(gf, gt, idx)
-                            if not TreeNode.is_grouping:
-                                child_group_feature = None
-                            else:
-                                # The grip that is being constructed by this action
-                                built_grip = new_cgf_manager.Gamma_final[idx][5]
-                                child_group_feature = (1, built_grip)
-                            new_node = TreeNode(new_gmrc, new_cgf_manager,
-                                        self, self.g_depth + 1, 0,
-                                        self.tree, child_group_feature)
-                            if new_node.is_novel:
-                                self.children.append(new_node)
-                        continue
-                    if not new_gmrc.execute_action(action):
-                        continue
-                    self.children.extend(
-                        self._get_all_memebers_in_grasping_group(new_gmrc, action))
+                            grasp_actions.append((action, idx))
+                    else:
+                        grasp_actions.append(action)
+
+            # Get Release Children
+            release_children = [TreeNode.get_release_child(self, action)
+                                for action in release_actions]
+            for child in release_children:
+                if child is not None:
+                    self.children.append(child)
+
+            # Get Grasp Children
+            if self.cgf_manager.is_cursed:
+                # Have to Lift the Curse
+                grasp_children = [TreeNode.get_uncursed_child(self, action)
+                                    for action in grasp_actions]
+            else:
+                # Try all feasible mediocre or constructive actions
+                grasp_children = TreeNode.get_grasp_children(self, grasp_actions)
+            for child in grasp_children:
+                if child is not None:
+                    self.children.append(child)
         
         self.release_expanded = True
         if not release_only:
@@ -358,6 +488,18 @@ class TreeNode:
             grand_child = child.expand_to(tar_depth, is_g_depth, cur_depth + 1)
             if grand_child is not None:                         # Early Stop
                 return grand_child
+            
+        # TODO: TO delete:
+        # if self.g_depth == 3 and self.parent.group_feature[0] == 0:
+        #     self.gmrc.show_geometry()
+        #     node = self
+        #     while node is not None:
+        #         node.gmrc.print_all_angs()
+        #         node = node.parent
+        #     print(self.gmrc.gripper2module)
+        #     print(self.cgf_manager.can_release)
+        #     raise RuntimeError("aaa")
+        #     print("--------------")
 
         return None
 
@@ -398,138 +540,197 @@ class TreeNode:
                                  self.tree, child_group_feature)
                 break
         return child.extend_to_goal()
-
-    # Get all reasonable children from the same grasping action based on eldest sibling
-    # NOTE: Will not have a->b with alpha and b->a with alpha
-    #       since will only have a->b from EMRC.get_all_actions()
-    def _get_all_memebers_in_grasping_group(self, new_gmrc: GMRC, action: tuple):
+    
+    # Get the child of the node after a release action
+    @staticmethod
+    def get_release_child(node: TreeNode, release_action):
+        new_gmrc = node.gmrc.copy()
+        new_gmrc.execute_action(release_action)
         if not TreeNode.is_grouping:
             child_group_feature = None
         else:
-            child_group_feature = (2, 0)
-        optim_node = TreeNode(new_gmrc, self.cgf_manager.copy(),
-                            self, self.g_depth + 1, self.mediocrity + 1,
-                            self.tree, child_group_feature)
-        if optim_node.is_novel:
-            members = [optim_node]
-        else:
-            members = []
-        
-        gf = action[0]
-        gt = action[1]
-        grip = new_gmrc.module2gripper[gf % 2][gf // 2] // 3
-        is_w_grip = new_gmrc.is_grip_w[grip]
-        mid_ang = new_gmrc.get_grip_gamma(grip)
+            child_group_feature = (0, 0)
+        new_node = TreeNode(new_gmrc, node.cgf_manager.copy(),
+                            node, node.g_depth, node.mediocrity,
+                            node.tree, child_group_feature)
+        if not new_node.is_novel:
+            return None
+        return new_node
 
-        if new_gmrc.is_2_cycle(-1):                 # If happen to build an angle
-            if optim_node.is_novel:
-                all_idxes = self.cgf_manager.get_angle_idxes(gf, gt, is_w_grip)
+    # Get uncursed child of the node after a curse-lifting action
+    @staticmethod
+    def get_uncursed_child(node: TreeNode, curse_lifting_action):
+        new_gmrc = node.gmrc.copy()
+        grasp_action, idx = curse_lifting_action
+        gf = grasp_action[0]
+        gt = grasp_action[1]
+        if not new_gmrc.execute_action(grasp_action):
+            return None
+        new_cgf_manager = node.cgf_manager.copy()
+        new_cgf_manager.break_curse()
+        new_cgf_manager.get_angle(gf, gt, idx)
+        if not TreeNode.is_grouping:
+            child_group_feature = None
+        else:
+            # The grip that is being constructed by this action
+            built_grip = new_cgf_manager.Gamma_final[idx][5]
+            child_group_feature = (1, built_grip)
+        new_node = TreeNode(new_gmrc, new_cgf_manager,
+                    node, node.g_depth + 1, 0,
+                    node.tree, child_group_feature)
+        if not new_node.is_novel:
+            return None
+        return new_node
+
+    # Get grasp children of the node after all grasp actions
+    @staticmethod
+    def get_grasp_children(node: TreeNode, grasp_actions):
+        children = []
+        mmm_result = ParOptimizer.par_dock_min_max(repeat(node.gmrc),
+                                                   grasp_actions,
+                                                   TreeNode.max_workers)
+        mdf_candidate = []
+        for i, (mid_gmrc,
+                (min_gmrc, min_ang),
+                (max_gmrc, max_ang)) in enumerate(mmm_result):
+            action = grasp_actions[i]
+            if mid_gmrc is None:
+                continue
+            if not TreeNode.is_grouping:
+                child_group_feature = None
+            else:
+                child_group_feature = (2, 0)
+            mid_node = TreeNode(mid_gmrc, node.cgf_manager.copy(),
+                            node, node.g_depth + 1, node.mediocrity + 1,
+                            node.tree, child_group_feature)
+            if mid_node.is_novel:
+                children.append(mid_node)
+
+            gf = action[0]
+            gt = action[1]
+            grip = mid_gmrc.module2gripper[gf % 2][gf // 2] // 3
+            is_w_grip = mid_gmrc.is_grip_w[grip]
+            mid_ang = mid_gmrc.get_grip_gamma(grip)
+            if mid_gmrc.is_2_cycle(-1):
+                if not mid_node.is_novel:
+                    continue
+                all_idxes = node.cgf_manager.get_angle_idxes(gf, gt, is_w_grip)
                 for idx in all_idxes:
-                    bc_cgf_manager = self.cgf_manager.copy()
-                    ang = bc_cgf_manager.get_angle(gf, gt, idx)
-                    if np.abs(ang - mid_ang) < 0.001 / 180 * np.pi:
-                        bc_gmrc = new_gmrc.copy()
+                    ang = node.cgf_manager.Gamma_final[idx][0]
+                    if np.abs(ang - mid_ang) < 0.01 / 180 * np.pi:
+                        bc_cgf_manager = node.cgf_manager.copy()
+                        bc_cgf_manager.get_angle(gf, gt, idx)
+                        bc_gmrc = mid_gmrc.copy()
                         if not TreeNode.is_grouping:
                             child_group_feature = None
                         else:
                             built_grip = bc_cgf_manager.Gamma_final[idx][5]
                             child_group_feature = (1, built_grip)
                         bc_node = TreeNode(bc_gmrc, bc_cgf_manager,
-                                           self, self.g_depth + 1, 0,
-                                           self.tree, child_group_feature)
-                        members.append(bc_node)
-            return members
+                                           node, node.g_depth + 1, 0,
+                                           node.tree, child_group_feature)
+                        children.append(bc_node)
+                continue
 
-        min_gmrc = new_gmrc.copy()
-        min_gmrc.modify_grsp_ang(grip, -GMRC.grsp_ang_cap)
-        min_ang = min_gmrc.get_grip_gamma(grip)
-        if min_ang < mid_ang:
-            if not TreeNode.is_grouping:
-                child_group_feature = None
+            if min_gmrc is not None:
+                if not TreeNode.is_grouping:
+                    child_group_feature = None
+                else:
+                    child_group_feature = (2, 0)
+                min_node = TreeNode(min_gmrc, node.cgf_manager.copy(),
+                            node, node.g_depth + 1, node.mediocrity + 1,
+                            node.tree, child_group_feature)
+                if mid_node.is_novel:
+                    children.append(min_node)
+
+            if max_gmrc is not None:
+                if not TreeNode.is_grouping:
+                    child_group_feature = None
+                else:
+                    child_group_feature = (2, 0)
+                max_node = TreeNode(max_gmrc, node.cgf_manager.copy(),
+                            node, node.g_depth + 1, node.mediocrity + 1,
+                            node.tree, child_group_feature)
+                if max_node.is_novel:
+                    children.append(max_node)
+
+            mdf_candidate.append((mid_gmrc, action, min_ang, max_ang))
+
+        # (gmrcs, grips, angles, choices, actions)
+        mdf_nominee = ([], [], [], [], [])
+        for mid_gmrc, action, min_ang, max_ang in mdf_candidate:
+            gf = action[0]
+            gt = action[1]
+            grip = mid_gmrc.module2gripper[gf % 2][gf // 2] // 3
+            is_w_grip = mid_gmrc.is_grip_w[grip]
+            if is_w_grip:
+                gi = mid_gmrc.gripper2module[3 * grip]
+                gamma_0 = mid_gmrc.grsp_angs[3 * grip]
             else:
-                child_group_feature = (2, 0)
-            min_node = TreeNode(min_gmrc, self.cgf_manager.copy(),
-                                self, self.g_depth + 1, self.mediocrity + 1,
-                                self.tree, child_group_feature)
-            if min_node.is_novel:
-                members.append(min_node)
-
-        max_gmrc = new_gmrc.copy()
-        max_gmrc.modify_grsp_ang(grip, GMRC.grsp_ang_cap)
-        max_ang = max_gmrc.get_grip_gamma(grip)
-        if max_ang > mid_ang:
-            if not TreeNode.is_grouping:
-                child_group_feature = None
-            else:
-                child_group_feature = (2, 0)
-            max_node = TreeNode(max_gmrc, self.cgf_manager.copy(),
-                                self, self.g_depth + 1, self.mediocrity + 1,
-                                self.tree, child_group_feature)
-            if max_node.is_novel:
-                members.append(max_node)
-
-        if is_w_grip:
-            gi = new_gmrc.gripper2module[3 * grip]
-            gamma_0 = new_gmrc.grsp_angs[3 * grip]
-        else:
-            gi = None
-            gamma_0 = None
-        all_choices = self.cgf_manager.get_ang_choices(gf, gt, is_w_grip, gi, gamma_0)
-        for choice in all_choices:
+                gi = None
+                gamma_0 = None
+            all_choices = node.cgf_manager.get_ang_choices(
+                gf, gt, is_w_grip, gi, gamma_0)
+            for choice in all_choices:
+                if isinstance(choice, tuple):
+                    ang = choice[0][0]
+                else:
+                    ang = node.cgf_manager.Gamma_final[choice][0]
+                    mid_gmrc.modify_ang_forcibly(ang, grip)
+                    if node.tree.is_duplicated_gmrc(mid_gmrc):
+                        ang = np.inf
+                    mid_gmrc.restore_grsp_ang()
+                if ang >= min_ang and ang <= max_ang:
+                    mdf_nominee[0].append(mid_gmrc)
+                    mdf_nominee[1].append(grip)
+                    mdf_nominee[2].append(ang)
+                    mdf_nominee[3].append(choice)
+                    mdf_nominee[4].append(action)
+        
+        modified_gmrcs = ParOptimizer.par_modify(mdf_nominee[0],
+                                                 mdf_nominee[1],
+                                                 mdf_nominee[2],
+                                                 TreeNode.max_workers)
+        for i, mdf_gmrc in enumerate(modified_gmrcs):
+            choice = mdf_nominee[3][i]
+            action = mdf_nominee[4][i]
+            if mdf_gmrc is None:
+                continue
             if isinstance(choice, tuple):
                 # "ss" means stepping-stone here
-                ss_cgf_manager = self.cgf_manager.copy()
+                ss_cgf_manager = node.cgf_manager.copy()
                 ss_cgf_manager.cursed_by(choice[1])
-                ang = choice[0][0]
-                if ang <= min_ang and ang >= max_ang:
-                    continue
-                ss_gmrc = new_gmrc.copy()
-                if not ss_gmrc.modify_grsp_ang(grip, ang):
-                    continue
-                if np.abs(ss_gmrc.get_grip_gamma(grip) - ang) > 1e-3:
-                    continue
-                
                 if not TreeNode.is_grouping:
                     child_group_feature = None
                 else:
                     # The grip that is being constructed by this action
                     built_grip = choice[0][1]
                     child_group_feature = (1, built_grip)
-                ss_node = TreeNode(ss_gmrc, ss_cgf_manager,
-                                   self, self.g_depth + 1, 0,
-                                   self.tree, child_group_feature)
+                ss_node = TreeNode(mdf_gmrc, ss_cgf_manager,
+                                   node, node.g_depth + 1, 0,
+                                   node.tree, child_group_feature)
                 if ss_node.is_novel:
-                    members.append(ss_node)
-            else:                                       # Building some correspondence
-                idx = choice
+                    children.append(ss_node)
+            else:
                 # "bc" means building correspondence here
-                bc_cgf_manager = self.cgf_manager.copy()
-                ang = bc_cgf_manager.get_angle(gf, gt, idx)
-                if ang <= min_ang and ang >= max_ang:
-                    continue
-                bc_gmrc = new_gmrc.copy()
-                bc_gmrc.modify_ang_forcibly(ang, grip)
-                if self.tree.is_duplicated_gmrc(bc_gmrc):
-                    continue
-                bc_gmrc.restore_grsp_ang()
-                if not bc_gmrc.modify_grsp_ang(grip, ang):
-                    continue
-                if np.abs(bc_gmrc.get_grip_gamma(grip) - ang) > 1e-3:
-                    continue
+                bc_cgf_manager = node.cgf_manager.copy()
+                gf = action[0]
+                gt = action[1]
+                idx = choice
+                bc_cgf_manager.get_angle(gf, gt, idx)
                 if not TreeNode.is_grouping:
                     child_group_feature = None
                 else:
                     # The grip that is being constructed by this action
                     built_grip = bc_cgf_manager.Gamma_final[idx][5]
                     child_group_feature = (1, built_grip)
-                bc_node = TreeNode(bc_gmrc, bc_cgf_manager,
-                                self, self.g_depth + 1, 0,
-                                self.tree, child_group_feature)
+                bc_node = TreeNode(mdf_gmrc, bc_cgf_manager,
+                                   node, node.g_depth + 1, 0,
+                                   node.tree, child_group_feature)
                 if bc_node.is_novel:
-                    members.append(bc_node)
-                if bc_node.is_goal():
-                    break
-        return members
+                    children.append(bc_node)
+        
+        return children
 
 class Tree:
     def __init__(self, gmrc: GMRC, cgf_manager: CGFManager, tar_gmrc: GMRC,
@@ -690,19 +891,19 @@ class IDVerdict:
     def get_id_ethnicity(self, gmrc):
         x, edge_index, cyclic_neighbors, neighbor_phis, neighbor_num = \
             gmrc.get_representation()
-        
-        x_oh = F.one_hot(x.to(self.device), GGNN.GGNN.max_num_degree).float()
+        with torch.inference_mode():
+            x_oh = F.one_hot(x.to(self.device), GGNN.GGNN.max_num_degree).float()
 
-        x_degree_feat = self.ggnn_embedding(x_oh)
+            x_degree_feat = self.ggnn_embedding(x_oh)
 
-        x_gnnout_feat = self.ggnn(
-            x_degree_feat,
-            edge_index.to(self.device),
-            cyclic_neighbors.to(self.device),
-            neighbor_phis.to(self.device),
-            neighbor_num.to(self.device))
+            x_gnnout_feat = self.ggnn(
+                x_degree_feat,
+                edge_index.to(self.device),
+                cyclic_neighbors.to(self.device),
+                neighbor_phis.to(self.device),
+                neighbor_num.to(self.device))
 
-        graph_feat = self.ggnn_pooling(x_gnnout_feat, torch.tensor([x.size()[0]]))
+            graph_feat = self.ggnn_pooling(x_gnnout_feat, torch.tensor([x.size()[0]]))
 
         grsp_ang_parity = int(np.sum(np.abs(gmrc.grsp_angs)) / np.pi * 180)
 
