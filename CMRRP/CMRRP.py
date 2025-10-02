@@ -343,7 +343,9 @@ class ParOptimizer:
         ParOptimizer.ensure_pool(max_workers)
         try:
             num_atomic_tasks = len(angs)
-            chunk_size = num_atomic_tasks // max_workers + 1
+            chunk_size = num_atomic_tasks // max_workers
+            if chunk_size * max_workers < num_atomic_tasks:
+                chunk_size = chunk_size + 1
             gmrc_chunks = []
             grip_chunks = []
             ang_chunks = []
