@@ -277,13 +277,14 @@ class ParOptimizer:
     def dock_min_max(gmrc: GMRC, action: tuple):
         if not gmrc.execute_action(action):
             return (None, (None, None), (None, None))
-        if gmrc.is_2_cycle(-1):
-            return (gmrc, (None, None), (None, None))
         
         mid_gmrc = gmrc
         gf = action[0]
         grip = mid_gmrc.module2gripper[gf % 2][gf // 2] // 3
         mid_ang = mid_gmrc.get_grip_gamma(grip)
+
+        if gmrc.is_2_cycle(-1):
+            return (gmrc, (None, mid_ang), (None, mid_ang))
         
         min_gmrc = gmrc.copy()
         if not min_gmrc.modify_grsp_ang(grip, -GMRC.grsp_ang_cap):
@@ -1005,8 +1006,6 @@ class MCTreeNode:
     def get_UCB(self, N):
         if self.n == 0:
             return self.get_FPU()
-        if self.Q == 0:
-            return 0.0
         return self.Q + MCTree.c * np.sqrt(np.log(N) / self.n)
 
     # The expand() function is also serving as part of the heuristic function
@@ -1198,12 +1197,12 @@ class MCTreeGroupNode(MCTreeNode):
 class MCTree:
     c = 0.2                                         # UCB Constant
 
-    w_progress = 0.3
-    w_promising = 0.7
+    w_progress = 0.1
+    w_promising = 0.9
 
     promising_score_constructive = 1.0
     promising_score_release = 0.7
-    promising_score_curse = 0.4
+    promising_score_curse = 0.6
     promising_score_mediocre = 0.1
 
     def __init__(self, node: TreeNode):
@@ -1269,7 +1268,7 @@ class CMRRP:
                     IDVerdict.strict_mode = True
                 target_angles[ang] = grip
         if IDVerdict.strict_mode:
-            print("\033[95mDetected Duplicated Angles, Turning on IDVerict Strict Mode\033[0m")
+            print("\033[95mDetected Duplicated Angles, Turning on IDVerdict Strict Mode\033[0m")
 
         CGFManager.m = gmrc_1.m
         cgf_manager = CGFManager(gmrc_2.get_Gamma_final())
