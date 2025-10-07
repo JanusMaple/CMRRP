@@ -898,7 +898,7 @@ class EDEstimator:
 
 # Identity Verdict
 class IDVerdict:
-    strict_mode = False
+    strict_mode = True
     thd = 1e-7
 
     def __init__(self,
@@ -1255,21 +1255,6 @@ class CMRRP:
     def plan(self, gmrc_1: GMRC, gmrc_2: GMRC, method = "BFS"):
         GMRC.suppress_action_err = True
         assert gmrc_1.m == gmrc_2.m
-
-        IDVerdict.strict_mode = False
-        target_angles = dict()
-        for grip in range(len(gmrc_2.grippers) // 3):
-            if gmrc_2.is_grip_w[grip]:
-                gpr_list = [grip * 3, grip * 3 + 1, grip * 3 + 2]
-            else:
-                gpr_list = [grip * 3]
-            for gpr in gpr_list:
-                ang = int(1e2 * np.abs(gmrc_2.grsp_angs[gpr] / np.pi * 180))
-                if ang in target_angles and not target_angles[ang] == grip:
-                    IDVerdict.strict_mode = True
-                target_angles[ang] = grip
-        if IDVerdict.strict_mode:
-            print("\033[95mDetected Duplicated Angles, Turning on IDVerdict Strict Mode\033[0m")
 
         CGFManager.m = gmrc_1.m
         cgf_manager = CGFManager(gmrc_2.get_Gamma_final())
