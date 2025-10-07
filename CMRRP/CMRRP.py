@@ -314,7 +314,8 @@ class ParOptimizer:
     @staticmethod
     def modify(gmrcs: list[GMRC], grips: list[int], angs: list[float]):
         modified_gmrcs = []
-        for gmrc, grip, ang in zip(gmrcs, grips, angs):
+        for ori_gmrc, grip, ang in zip(gmrcs, grips, angs):
+            gmrc = ori_gmrc.copy()
             if not gmrc.modify_grsp_ang(grip, ang):
                 modified_gmrcs.append(None)
                 continue
@@ -1202,7 +1203,7 @@ class MCTree:
 
     promising_score_constructive = 1.0
     promising_score_release = 0.7
-    promising_score_curse = 0.6
+    promising_score_curse = 0.3
     promising_score_mediocre = 0.1
 
     def __init__(self, node: TreeNode):
