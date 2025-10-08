@@ -52,12 +52,14 @@ def format_hms(seconds, *, trim_leading_zero=True, decimals=1):
 def plan_and_time(cmrrp: CMRRP, gmrc_1: GMRC, gmrc_2: GMRC, method: str, time_budget: float):
     start_time = time.time()
     path = cmrrp.plan(gmrc_1, gmrc_2, method, time_budget, False)
+    end_time = time.time()
     if path is not None:
         g_dis = path[-1].g_depth
+        delta_time = end_time - start_time
     else:
         g_dis = None
-    end_time = time.time()
-    return (path, g_dis, end_time - start_time)
+        delta_time = None
+    return (path, g_dis, delta_time)
 
 def main():
     GMRC.suppress_spawn_err = True
@@ -120,12 +122,10 @@ def main():
     n = args.n
     time_budget = args.t
     dir_name = args.dir
-    seed = 100000
+    seed = 865525
     num_tests = 0
-    bfs_total_time = 0
-    bfs_distances = []
-    mcts_total_time = 0
-    mcts_distances = []
+    bfs_times = []
+    mcts_times = []
     print(f"\033[94mm = {m}; Start Testing for {n} Rounds: \033[0m")
     while num_tests < n:
         gmrc_1 = GMRC.get_random_configuration(m=m, seed=seed)
@@ -133,13 +133,11 @@ def main():
         if gmrc_1.successfully_spawned and gmrc_2.successfully_spawned:
             bfs_path, bfs_dis, bfs_time = plan_and_time(
                 cmrrp, gmrc_1, gmrc_2, "IMT_BFS", time_budget)
-            bfs_distances.append(bfs_dis)
-            bfs_total_time = bfs_total_time + bfs_time
+            bfs_times.append(bfs_time)
 
             mcts_path, mcts_dis, mcts_time = plan_and_time(
                 cmrrp, gmrc_1, gmrc_2, "MCTS", time_budget)
-            mcts_distances.append(mcts_dis)
-            mcts_total_time = mcts_total_time + mcts_time
+            mcts_times.append(mcts_time)
 
             data = ((bfs_path, bfs_dis, bfs_time),
                     (mcts_path, mcts_dis, mcts_time))
@@ -153,11 +151,11 @@ def main():
             if bfs_path is None:
                 print("IMT_BFS \033[91mFailed\033[0m; ", end="")
             else:
-                if bfs_dis <= mcts_dis:
+                if mcts_dis is None or bfs_dis <= mcts_dis:
                     print(f"IMT_BFS finds \033[92m{bfs_dis}\033[0m", end="")
                 else:
                     print(f"IMT_BFS finds \033[91m{bfs_dis}\033[0m", end="")
-                if bfs_time <= mcts_time:
+                if mcts_time is None or bfs_time <= mcts_time:
                     print(f"-path in \033[92m{format_hms(bfs_time)}\033[0m; ", end="")
                 else:
                     print(f"-path in \033[91m{format_hms(bfs_time)}\033[0m; ", end="")
@@ -165,16 +163,30 @@ def main():
             if mcts_path is None:
                 print("MCTS \033[91mFailed\033[0m")
             else:
-                if mcts_dis <= bfs_dis:
+                if bfs_dis is None or mcts_dis <= bfs_dis:
                     print(f"MCTS finds \033[92m{mcts_dis}\033[0m", end="")
                 else:
                     print(f"MCTS finds \033[91m{mcts_dis}\033[0m", end="")
-                if mcts_time <= bfs_time:
+                if bfs_time is None or mcts_time <= bfs_time:
                     print(f"-path in \033[92m{format_hms(mcts_time)}\033[0m")
                 else:
                     print(f"-path in \033[91m{format_hms(mcts_time)}\033[0m")
         else:
             seed = seed + 1
+
+    bfs_succ_times = [dt for dt in bfs_times if dt is not None]
+    bfs_mean = np.mean(np.array(bfs_succ_times))
+    bfs_std = np.std(np.array(bfs_succ_times))
+    bfs_succ_rate = len(bfs_succ_times) / n
+    print(f"IMT_BFS takes \033[96m{format_hms(bfs_mean)}±{format_hms(bfs_std)}\033[0m", end="")
+    print(f" with Success Rate: \033[96m{bfs_succ_rate * 100:.1f}%\033[0m")
+
+    mcts_succ_times = [dt for dt in mcts_times if dt is not None]
+    mcts_mean = np.mean(np.array(mcts_succ_times))
+    mcts_std = np.std(np.array(mcts_succ_times))
+    mcts_succ_rate = len(mcts_succ_times) / n
+    print(f"MCTS takes \033[96m{format_hms(mcts_mean)}±{format_hms(mcts_std)}\033[0m", end="")
+    print(f" with Success Rate: \033[96m{mcts_succ_rate * 100:.1f}%\033[0m")
 
 if __name__ == "__main__":
     import multiprocessing as mp
