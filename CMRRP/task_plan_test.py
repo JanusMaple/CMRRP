@@ -52,7 +52,10 @@ def format_hms(seconds, *, trim_leading_zero=True, decimals=1):
 def plan_and_time(cmrrp: CMRRP, gmrc_1: GMRC, gmrc_2: GMRC, method: str, time_budget: float):
     start_time = time.time()
     path = cmrrp.plan(gmrc_1, gmrc_2, method, time_budget, False)
-    g_dis = path[-1].g_depth
+    if path is not None:
+        g_dis = path[-1].g_depth
+    else:
+        g_dis = None
     end_time = time.time()
     return (path, g_dis, end_time - start_time)
 
@@ -140,8 +143,8 @@ def main():
 
             data = ((bfs_path, bfs_dis, bfs_time),
                     (mcts_path, mcts_dis, mcts_time))
-            file_name = f"{m}_{seed}.pt"
-            # torch.save(data, dir_name + file_name)
+            file_name = f"/{m}_{seed}.pt"
+            torch.save(data, dir_name + file_name)
 
             num_tests = num_tests + 1
             seed = seed + 1
