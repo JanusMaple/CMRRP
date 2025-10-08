@@ -19,7 +19,7 @@ from GGNN import GGNN
 from GGNN import DegreeEmbedding as GGDE
 from GGNN import SequentialPooling as GGSP
 
-def format_hms(seconds, *, trim_leading_zero=True, decimals=0):
+def format_hms(seconds, *, trim_leading_zero=True, decimals=1):
     """Return e.g. 3671 -> '1h 1m 11s', 65 -> '1m 5s'."""
     sign = "-" if seconds < 0 else ""
     seconds = abs(seconds)
@@ -49,9 +49,9 @@ def format_hms(seconds, *, trim_leading_zero=True, decimals=0):
     parts.append(f"{s_str}s")
     return sign + " ".join(parts)
 
-def plan_and_time(cmrrp: CMRRP, gmrc_1: GMRC, gmrc_2: GMRC, method: str = "MCTS"):
+def plan_and_time(cmrrp: CMRRP, gmrc_1: GMRC, gmrc_2: GMRC, method: str, time_budget: float):
     start_time = time.time()
-    path = cmrrp.plan(gmrc_1, gmrc_2, method=method)
+    path = cmrrp.plan(gmrc_1, gmrc_2, method, time_budget, False)
     g_dis = path[-1].g_depth
     end_time = time.time()
     return (path, g_dis, end_time - start_time)
@@ -59,11 +59,13 @@ def plan_and_time(cmrrp: CMRRP, gmrc_1: GMRC, gmrc_2: GMRC, method: str = "MCTS"
 def main():
     GMRC.suppress_spawn_err = True
     parser = argparse.ArgumentParser(
-        description="Select Number of Modules, Number of Tests and Save Directory")
+        description="Select Parameters for Task Plan Test")
     parser.add_argument('--m', type=int, default=3,
                         help='Number of Modules')
     parser.add_argument('--n', type=int, default=100,
                         help='Number of Tests')
+    parser.add_argument('--t', type=float, default=60.0,
+                        help='Time Budget (s)')
     default_dirname = os.path.dirname(os.path.abspath(__file__)) + "/data"
     parser.add_argument('--dir', type=str, default=default_dirname,
                         help='Where to save planned results')
@@ -113,6 +115,7 @@ def main():
     """
     m = args.m
     n = args.n
+    time_budget = args.t
     dir_name = args.dir
     seed = 100000
     num_tests = 0
@@ -126,41 +129,49 @@ def main():
         gmrc_2 = GMRC.get_random_configuration(m=m, seed=1000000+seed)
         if gmrc_1.successfully_spawned and gmrc_2.successfully_spawned:
             bfs_path, bfs_dis, bfs_time = plan_and_time(
-                cmrrp, gmrc_1, gmrc_2, "IMT_BFS")
+                cmrrp, gmrc_1, gmrc_2, "IMT_BFS", time_budget)
             bfs_distances.append(bfs_dis)
             bfs_total_time = bfs_total_time + bfs_time
 
             mcts_path, mcts_dis, mcts_time = plan_and_time(
-                cmrrp, gmrc_1, gmrc_2, "MCTS")
+                cmrrp, gmrc_1, gmrc_2, "MCTS", time_budget)
             mcts_distances.append(mcts_dis)
             mcts_total_time = mcts_total_time + mcts_time
 
             data = ((bfs_path, bfs_dis, bfs_time),
                     (mcts_path, mcts_dis, mcts_time))
             file_name = f"{m}_{seed}.pt"
-            torch.save(data, dir_name + file_name)
-
-            print(f"Test: {num_tests}; Seed: {seed}; ", end="")
-            if bfs_dis <= mcts_dis:
-                print(f"IMT_BFS finds \033[92m{bfs_dis}\033[0m", end="")
-            else:
-                print(f"IMT_BFS finds \033[91m{bfs_dis}\033[0m", end="")
-            if bfs_time <= mcts_time:
-                print(f"-path in \033[92m{format_hms(bfs_time)}\033[0m; ", end="")
-            else:
-                print(f"-path in \033[91m{format_hms(bfs_time)}\033[0m; ", end="")
-            
-            if mcts_dis <= bfs_dis:
-                print(f"IMT_BFS finds \033[92m{mcts_dis}\033[0m", end="")
-            else:
-                print(f"IMT_BFS finds \033[91m{mcts_dis}\033[0m", end="")
-            if mcts_time <= bfs_time:
-                print(f"-path in \033[92m{format_hms(mcts_time)}\033[0m")
-            else:
-                print(f"-path in \033[91m{format_hms(mcts_time)}\033[0m")
+            # torch.save(data, dir_name + file_name)
 
             num_tests = num_tests + 1
-        seed = seed + 1
+            seed = seed + 1
+
+            print(f"Round-{num_tests}; Seed: {seed}; ", end="")
+            if bfs_path is None:
+                print("IMT_BFS \033[91mFailed\033[0m; ", end="")
+            else:
+                if bfs_dis <= mcts_dis:
+                    print(f"IMT_BFS finds \033[92m{bfs_dis}\033[0m", end="")
+                else:
+                    print(f"IMT_BFS finds \033[91m{bfs_dis}\033[0m", end="")
+                if bfs_time <= mcts_time:
+                    print(f"-path in \033[92m{format_hms(bfs_time)}\033[0m; ", end="")
+                else:
+                    print(f"-path in \033[91m{format_hms(bfs_time)}\033[0m; ", end="")
+            
+            if mcts_path is None:
+                print("MCTS \033[91mFailed\033[0m")
+            else:
+                if mcts_dis <= bfs_dis:
+                    print(f"MCTS finds \033[92m{mcts_dis}\033[0m", end="")
+                else:
+                    print(f"MCTS finds \033[91m{mcts_dis}\033[0m", end="")
+                if mcts_time <= bfs_time:
+                    print(f"-path in \033[92m{format_hms(mcts_time)}\033[0m")
+                else:
+                    print(f"-path in \033[91m{format_hms(mcts_time)}\033[0m")
+        else:
+            seed = seed + 1
 
 if __name__ == "__main__":
     import multiprocessing as mp

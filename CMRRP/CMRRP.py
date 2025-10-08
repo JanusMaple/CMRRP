@@ -9,6 +9,7 @@ sys.path.append('../GENN')
 sys.path.append('../GGNN')
 import os, multiprocessing as mp
 import copy
+import time
 import warnings
 from concurrent.futures import ProcessPoolExecutor
 from concurrent.futures.process import BrokenProcessPool
@@ -830,11 +831,12 @@ class Tree:
         return goal_node
     
     # Explore the configuration tree by gradually increasing mediocrity tolerance
-    def explore(self):
+    def explore(self, time_budget):
         TreeNode.mediocrity_tolerance = 0
         current_depth = 0
         if not Tree.suppress_print:
             print(f"\33[93mMediocrity Tolerance: {TreeNode.mediocrity_tolerance}\33[0m")
+        start_time = time.time()
         while True:
             num_nodes = len(self.nodes_at_depth[current_depth])
             if not Tree.suppress_print:
@@ -865,6 +867,8 @@ class Tree:
                 cur_mt = TreeNode.mediocrity_tolerance
                 if not Tree.suppress_print:
                     print(f"\33[93mMediocrity Tolerance: {cur_mt}\33[0m")
+            if time.time() - start_time > time_budget:
+                return None
 
 # Edit Distance Estimator
 class EDEstimator:
@@ -1232,7 +1236,8 @@ class MCTree:
             node = new_node
         return node
 
-    def search_for_goal(self):
+    def search_for_goal(self, time_budget):
+        start_time = time.time()
         while True:
             node = self.select()
             node.expand()
@@ -1241,6 +1246,8 @@ class MCTree:
 
             if self.is_goal_found:
                 return self.goal_node.extend_to_goal()
+            if time.time() - start_time > time_budget:
+                return None
 
 class CMRRP:
     def __init__(self,
@@ -1262,7 +1269,8 @@ class CMRRP:
         IMT_BFS: BFS with Iterative Mediocrity Tolerance
         MCTS: Single Monte Carlo Tree Search with Hierarchical Grouping Nodes
     """
-    def plan(self, gmrc_1: GMRC, gmrc_2: GMRC, method = "BFS", is_print = True):
+    def plan(self, gmrc_1: GMRC, gmrc_2: GMRC, method = "BFS",
+             time_budget = 300, is_print = True):
         GMRC.suppress_action_err = True
         assert gmrc_1.m == gmrc_2.m
 
@@ -1286,20 +1294,27 @@ class CMRRP:
         cgf_manager = CGFManager(gmrc_2.get_Gamma_final())
         self.tree = Tree(gmrc_1, cgf_manager, gmrc_2, self.ed_estimator, self.id_verdict)
 
+        start_time = time.time()
         if method == "BFS":
             TreeNode.is_grouping = False
             while True:
                 node = self.tree.push_front()
                 if node is not None:
                     break
+                if time.time() - start_time > time_budget:
+                    return None
         elif method == "IMT_BFS":
             TreeNode.is_grouping = False
-            node = self.tree.explore()
+            node = self.tree.explore(time_budget)
+            if node is None:
+                return None
         elif method == "MCTS":
             TreeNode.mediocrity_tolerance = 9999
             TreeNode.is_grouping = True
             self.mctree = MCTree(self.tree.root)
-            node = self.mctree.search_for_goal()
+            node = self.mctree.search_for_goal(time_budget)
+            if node is None:
+                return None
 
         path = [node]
         while node.parent is not None:
