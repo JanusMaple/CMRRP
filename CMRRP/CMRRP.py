@@ -320,7 +320,7 @@ class ParOptimizer:
                 modified_gmrcs.append(None)
                 continue
             modified_ang = gmrc.get_grip_gamma(grip)
-            if np.abs(modified_ang - ang) > 1e-3:
+            if np.abs(modified_ang - ang) > 0.5 / 180 * np.pi:
                 modified_gmrcs.append(None)
                 continue
             modified_gmrcs.append(gmrc)
@@ -625,13 +625,12 @@ class TreeNode:
             grip = mid_gmrc.module2gripper[gf % 2][gf // 2] // 3
             is_w_grip = mid_gmrc.is_grip_w[grip]
             mid_ang = mid_gmrc.get_grip_gamma(grip)
-            if mid_gmrc.is_2_cycle(-1):
-                if not mid_node.is_novel:
-                    continue
+
+            if mid_node.is_novel:
                 all_idxes = node.cgf_manager.get_angle_idxes(gf, gt, is_w_grip)
                 for idx in all_idxes:
                     ang = node.cgf_manager.Gamma_final[idx][0]
-                    if np.abs(ang - mid_ang) < 0.01 / 180 * np.pi:
+                    if np.abs(ang - mid_ang) < 0.5 / 180 * np.pi:
                         bc_cgf_manager = node.cgf_manager.copy()
                         bc_cgf_manager.get_angle(gf, gt, idx)
                         bc_gmrc = mid_gmrc.copy()
@@ -641,9 +640,11 @@ class TreeNode:
                             built_grip = bc_cgf_manager.Gamma_final[idx][5]
                             child_group_feature = (1, built_grip)
                         bc_node = TreeNode(bc_gmrc, bc_cgf_manager,
-                                           node, node.g_depth + 1, 0,
-                                           node.tree, child_group_feature)
+                                            node, node.g_depth + 1, 0,
+                                            node.tree, child_group_feature)
                         children.append(bc_node)
+            
+            if mid_gmrc.is_2_cycle(-1):
                 continue
 
             if min_gmrc is not None:
@@ -898,7 +899,7 @@ class EDEstimator:
 
 # Identity Verdict
 class IDVerdict:
-    strict_mode = True
+    strict_mode = False
     thd = 1e-7
 
     def __init__(self,
@@ -1249,12 +1250,27 @@ class CMRRP:
     """
     Methods:
         BFS: Simple breadth first search with fixed mediocrity tolerance
-        DMT_BFS: BFS with dynamic mediocrity tolerance
+        IMT_BFS: BFS with Iterative Mediocrity Tolerance
         MCTS: Single Monte Carlo Tree Search with Hierarchical Grouping Nodes
     """
     def plan(self, gmrc_1: GMRC, gmrc_2: GMRC, method = "BFS"):
         GMRC.suppress_action_err = True
         assert gmrc_1.m == gmrc_2.m
+
+        IDVerdict.strict_mode = False
+        target_angles = dict()
+        for grip in range(len(gmrc_2.grippers) // 3):
+            if gmrc_2.is_grip_w[grip]:
+                gpr_list = [grip * 3, grip * 3 + 1, grip * 3 + 2]
+            else:
+                gpr_list = [grip * 3]
+            for gpr in gpr_list:
+                ang = int(1e2 * np.abs(gmrc_2.grsp_angs[gpr] / np.pi * 180))
+                if ang in target_angles and not target_angles[ang] == grip:
+                    IDVerdict.strict_mode = True
+                target_angles[ang] = grip
+        if IDVerdict.strict_mode:
+            print("\033[95mDetected Duplicated Angles, Turning on IDVerdict Strict Mode\033[0m")
 
         CGFManager.m = gmrc_1.m
         cgf_manager = CGFManager(gmrc_2.get_Gamma_final())
@@ -1266,7 +1282,7 @@ class CMRRP:
                 node = self.tree.push_front()
                 if node is not None:
                     break
-        elif method == "DMT_BFS":
+        elif method == "IMT_BFS":
             TreeNode.is_grouping = False
             node = self.tree.explore()
         elif method == "MCTS":
