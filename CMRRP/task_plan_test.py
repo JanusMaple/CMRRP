@@ -122,10 +122,12 @@ def main():
     n = args.n
     time_budget = args.t
     dir_name = args.dir
-    seed = 865525
+    seed = 100000
     num_tests = 0
     bfs_times = []
     mcts_times = []
+    bfs_distances = []
+    mcts_distances = []
     print(f"\033[94mm = {m}; Start Testing for {n} Rounds: \033[0m")
     while num_tests < n:
         gmrc_1 = GMRC.get_random_configuration(m=m, seed=seed)
@@ -133,10 +135,12 @@ def main():
         if gmrc_1.successfully_spawned and gmrc_2.successfully_spawned:
             bfs_path, bfs_dis, bfs_time = plan_and_time(
                 cmrrp, gmrc_1, gmrc_2, "IMT_BFS", time_budget)
+            bfs_distances.append(bfs_dis)
             bfs_times.append(bfs_time)
 
             mcts_path, mcts_dis, mcts_time = plan_and_time(
                 cmrrp, gmrc_1, gmrc_2, "MCTS", time_budget)
+            mcts_distances.append(mcts_dis)
             mcts_times.append(mcts_time)
 
             data = ((bfs_path, bfs_dis, bfs_time),
@@ -185,8 +189,17 @@ def main():
     mcts_mean = np.mean(np.array(mcts_succ_times))
     mcts_std = np.std(np.array(mcts_succ_times))
     mcts_succ_rate = len(mcts_succ_times) / n
+    optimal_times = 0
+    both_solved_times = 0
+    for bfs_dis, mcts_dis in zip(bfs_distances, mcts_distances):
+        if bfs_dis is not None and mcts_dis is not None:
+            both_solved_times = both_solved_times + 1
+            if mcts_dis <= bfs_dis:
+                optimal_times = optimal_times + 1
+
     print(f"MCTS takes \033[96m{format_hms(mcts_mean)}±{format_hms(mcts_std)}\033[0m", end="")
-    print(f" with Success Rate: \033[96m{mcts_succ_rate * 100:.1f}%\033[0m")
+    print(f" with Success Rate: \033[96m{mcts_succ_rate * 100:.1f}%\033[0m", end="")
+    print(f"; Optimal Rate: \033[96m{optimal_times / both_solved_times * 100:.1f}%\033[0m")
 
 if __name__ == "__main__":
     import multiprocessing as mp
