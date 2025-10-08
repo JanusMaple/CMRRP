@@ -750,6 +750,8 @@ class TreeNode:
         return children
 
 class Tree:
+    suppress_print = False
+
     def __init__(self, gmrc: GMRC, cgf_manager: CGFManager, tar_gmrc: GMRC,
                  ed_estimator: EDEstimator, id_verdict: IDVerdict):
         self.nodes_at_depth: list[TreeNode] = [[]]
@@ -823,39 +825,46 @@ class Tree:
         if max_g_depth_before == max_g_depth_after:
             raise RuntimeError("Can not further expand any leaf nodes!")
         num_new_nodes = len(self.nodes_at_depth[-1])
-        print(f"Find {num_new_nodes} nodes at depth {len(self.nodes_at_depth) - 1}")
+        if not Tree.suppress_print:
+            print(f"Find {num_new_nodes} nodes at depth {len(self.nodes_at_depth) - 1}")
         return goal_node
     
     # Explore the configuration tree by gradually increasing mediocrity tolerance
     def explore(self):
         TreeNode.mediocrity_tolerance = 0
         current_depth = 0
-        print(f"\33[93mMediocrity Tolerance: {TreeNode.mediocrity_tolerance}\33[0m")
+        if not Tree.suppress_print:
+            print(f"\33[93mMediocrity Tolerance: {TreeNode.mediocrity_tolerance}\33[0m")
         while True:
             num_nodes = len(self.nodes_at_depth[current_depth])
-            print(f"    Expanding {num_nodes} nodes at depth {current_depth}", 
-                  end = "")
+            if not Tree.suppress_print:
+                print(f"    Expanding {num_nodes} nodes at depth {current_depth}", 
+                    end = "")
             for node in self.nodes_at_depth[current_depth]:
                 goal_node = node.expand()
                 if goal_node is not None:
                     goal_node = goal_node.extend_to_goal()
                     num_nodes = len(self.nodes_at_depth[current_depth])
-                    print(f"\r    Find {num_nodes} nodes at depth {current_depth}", 
-                          end = "        \n")
+                    if not Tree.suppress_print:
+                        print(f"\r    Find {num_nodes} nodes at depth {current_depth}", 
+                            end = "        \n")
                     current_depth = current_depth + 1
                     num_nodes = len(self.nodes_at_depth[current_depth])
-                    print(f"\r    Find {num_nodes} nodes at depth {current_depth}", 
-                          end = "        \n")
+                    if not Tree.suppress_print:
+                        print(f"\r    Find {num_nodes} nodes at depth {current_depth}", 
+                            end = "        \n")
                     return goal_node
             num_nodes = len(self.nodes_at_depth[current_depth])
-            print(f"\r    Find {num_nodes} nodes at depth {current_depth}",
-                  end = "        \n")
+            if not Tree.suppress_print:
+                print(f"\r    Find {num_nodes} nodes at depth {current_depth}",
+                    end = "        \n")
             current_depth = current_depth + 1
             if current_depth >= len(self.nodes_at_depth):
                 TreeNode.mediocrity_tolerance = TreeNode.mediocrity_tolerance + 1
                 current_depth = 0
                 cur_mt = TreeNode.mediocrity_tolerance
-                print(f"\33[93mMediocrity Tolerance: {cur_mt}\33[0m")
+                if not Tree.suppress_print:
+                    print(f"\33[93mMediocrity Tolerance: {cur_mt}\33[0m")
 
 # Edit Distance Estimator
 class EDEstimator:
@@ -1253,7 +1262,7 @@ class CMRRP:
         IMT_BFS: BFS with Iterative Mediocrity Tolerance
         MCTS: Single Monte Carlo Tree Search with Hierarchical Grouping Nodes
     """
-    def plan(self, gmrc_1: GMRC, gmrc_2: GMRC, method = "BFS"):
+    def plan(self, gmrc_1: GMRC, gmrc_2: GMRC, method = "BFS", is_print = True):
         GMRC.suppress_action_err = True
         assert gmrc_1.m == gmrc_2.m
 
@@ -1269,8 +1278,9 @@ class CMRRP:
                 if ang in target_angles and not target_angles[ang] == grip:
                     IDVerdict.strict_mode = True
                 target_angles[ang] = grip
-        if IDVerdict.strict_mode:
+        if IDVerdict.strict_mode and is_print:
             print("\033[95mDetected Duplicated Angles, Turning on IDVerdict Strict Mode\033[0m")
+        Tree.suppress_print = not is_print
 
         CGFManager.m = gmrc_1.m
         cgf_manager = CGFManager(gmrc_2.get_Gamma_final())

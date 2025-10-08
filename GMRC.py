@@ -44,6 +44,7 @@ class GMRC(EMRC):
     # place (i, r): r position of segment i
     text_place = [(0, 0.3), (2, 0.5), (4, 0.7)]
 
+    suppress_spawn_err = False  # Whether to suppress spawn error print
     suppress_action_err = False # Whether to suppress grasp/modify error print
 
     def __init__(self, w, v, n, m, grippers, gripper2module, module2gripper, rng,
@@ -86,11 +87,13 @@ class GMRC(EMRC):
             for _ in range(10):
                 self.bend_angs, self.grsp_angs = self.get_random_angles_da()
                 if cannot_be_docked:
-                    print('\033[91mFailed for Docking Loops :(\033[0m')
+                    if not GMRC.suppress_spawn_err:
+                        print('\033[91mFailed for Docking Loops :(\033[0m')
                     self.successfully_spawned = False
                     break
                 elif not is_planar:
-                    print('\033[91mThe Graph is Not Planar :(\033[0m')
+                    if not GMRC.suppress_spawn_err:
+                        print('\033[91mThe Graph is Not Planar :(\033[0m')
                     self.successfully_spawned = False
                     break
                 if len(self.module_loops) > 0:              # If the graph is not acyclic
@@ -112,7 +115,8 @@ class GMRC(EMRC):
                 if not self.is_collision_detected():
                     break                                   # Until no collision
             else:                                           # Cannot break the loop
-                print('\033[91mFailed for Finding Collision-Free Layout :(\033[0m')
+                if not GMRC.suppress_spawn_err:
+                    print('\033[91mFailed for Finding Collision-Free Layout :(\033[0m')
                 self.successfully_spawned = False
         else:
             self.bend_angs = bending_angles

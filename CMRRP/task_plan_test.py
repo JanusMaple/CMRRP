@@ -1,0 +1,169 @@
+"""
+Compare Plan Speed Between IMT_BFS and MCTS
+"""
+
+import sys
+sys.path.append('..')
+sys.path.append('../GENN')
+sys.path.append('../GGNN')
+import os
+import time
+import argparse
+from GMRC import GMRC
+from CMRRP import *
+import torch
+from GENN import GENN
+from GENN import DegreeEmbedding as GEDE
+from GENN import SequentialPooling as GESP
+from GGNN import GGNN
+from GGNN import DegreeEmbedding as GGDE
+from GGNN import SequentialPooling as GGSP
+
+def format_hms(seconds, *, trim_leading_zero=True, decimals=0):
+    """Return e.g. 3671 -> '1h 1m 11s', 65 -> '1m 5s'."""
+    sign = "-" if seconds < 0 else ""
+    seconds = abs(seconds)
+
+    h, rem = divmod(int(seconds), 3600)
+    m, s_int = divmod(rem, 60)
+
+    # handle fractional seconds if requested
+    frac = seconds - int(seconds)
+    if decimals > 0:
+        s = s_int + frac
+        s_str = f"{s:.{decimals}f}".rstrip("0").rstrip(".")
+    else:
+        # round to nearest second and carry over if needed
+        s = round(s_int + frac)
+        if s == 60:
+            s = 0; m += 1
+        if m == 60:
+            m = 0; h += 1
+        s_str = str(int(s))
+
+    parts = []
+    if not trim_leading_zero or h:
+        parts.append(f"{h}h")
+    if not trim_leading_zero or h or m:
+        parts.append(f"{m}m")
+    parts.append(f"{s_str}s")
+    return sign + " ".join(parts)
+
+def plan_and_time(cmrrp: CMRRP, gmrc_1: GMRC, gmrc_2: GMRC, method: str = "MCTS"):
+    start_time = time.time()
+    path = cmrrp.plan(gmrc_1, gmrc_2, method=method)
+    g_dis = path[-1].g_depth
+    end_time = time.time()
+    return (path, g_dis, end_time - start_time)
+
+def main():
+    GMRC.suppress_spawn_err = True
+    parser = argparse.ArgumentParser(
+        description="Select Number of Modules, Number of Tests and Save Directory")
+    parser.add_argument('--m', type=int, default=3,
+                        help='Number of Modules')
+    parser.add_argument('--n', type=int, default=100,
+                        help='Number of Tests')
+    default_dirname = os.path.dirname(os.path.abspath(__file__)) + "/data"
+    parser.add_argument('--dir', type=str, default=default_dirname,
+                        help='Where to save planned results')
+    args = parser.parse_args()
+    if args.n > 1000:
+        raise ValueError("More than 1000 tests will take a loooooong time. ")
+    
+    device = torch.device('cpu')
+
+    genn_degree_embedding = GEDE(embed_dim=16, device=device)
+    genn = GENN(16, 32, 32, device)
+    genn_pooling = GESP(32, 32, 16, device)
+    checkpoint = torch.load("../GENN/model/bfs_trained_model.pth", map_location=device)
+    genn_degree_embedding.load_state_dict(checkpoint['degree_embedding'])
+    genn.load_state_dict(checkpoint['gnn'])
+    genn_pooling.load_state_dict(checkpoint['pooling'])
+    genn_degree_embedding.eval()
+    genn.eval()
+    genn_pooling.eval()
+
+    ggnn_degree_embedding = GGDE(embed_dim=2, device=device)
+    ggnn = GGNN(2, 2, 2, device)
+    ggnn_pooling = GGSP(2, 2, 1, device)
+    checkpoint = torch.load("../GGNN/model/ggnn_hash_model.pth", map_location=device)
+    ggnn_degree_embedding.load_state_dict(checkpoint['degree_embedding'])
+    ggnn.load_state_dict(checkpoint['gnn'])
+    ggnn_pooling.load_state_dict(checkpoint['pooling'])
+    ggnn_degree_embedding.eval()
+    ggnn.eval()
+    ggnn_pooling.eval()
+
+    cmrrp = CMRRP(
+        ggnn, ggnn_degree_embedding, ggnn_pooling,
+        genn, genn_degree_embedding, genn_pooling,
+        device
+    )
+
+    """
+    Warm up MCTS by creating all workders for ParOptimizer
+    """
+    gmrc_1 = GMRC.get_random_configuration(m=3, seed=726130)
+    gmrc_2 = GMRC.get_random_configuration(m=3, seed=1726130)
+    _ = cmrrp.plan(gmrc_1, gmrc_2, "MCTS")
+
+    """
+    Test for n times and record the results
+    """
+    m = args.m
+    n = args.n
+    dir_name = args.dir
+    seed = 100000
+    num_tests = 0
+    bfs_total_time = 0
+    bfs_distances = []
+    mcts_total_time = 0
+    mcts_distances = []
+    print(f"\033[94mm = {m}; Start Testing for {n} Rounds: \033[0m")
+    while num_tests < n:
+        gmrc_1 = GMRC.get_random_configuration(m=m, seed=seed)
+        gmrc_2 = GMRC.get_random_configuration(m=m, seed=1000000+seed)
+        if gmrc_1.successfully_spawned and gmrc_2.successfully_spawned:
+            bfs_path, bfs_dis, bfs_time = plan_and_time(
+                cmrrp, gmrc_1, gmrc_2, "IMT_BFS")
+            bfs_distances.append(bfs_dis)
+            bfs_total_time = bfs_total_time + bfs_time
+
+            mcts_path, mcts_dis, mcts_time = plan_and_time(
+                cmrrp, gmrc_1, gmrc_2, "MCTS")
+            mcts_distances.append(mcts_dis)
+            mcts_total_time = mcts_total_time + mcts_time
+
+            data = ((bfs_path, bfs_dis, bfs_time),
+                    (mcts_path, mcts_dis, mcts_time))
+            file_name = f"{m}_{seed}.pt"
+            torch.save(data, dir_name + file_name)
+
+            print(f"Test: {num_tests}; Seed: {seed}; ", end="")
+            if bfs_dis <= mcts_dis:
+                print(f"IMT_BFS finds \033[92m{bfs_dis}\033[0m", end="")
+            else:
+                print(f"IMT_BFS finds \033[91m{bfs_dis}\033[0m", end="")
+            if bfs_time <= mcts_time:
+                print(f"-path in \033[92m{format_hms(bfs_time)}\033[0m; ", end="")
+            else:
+                print(f"-path in \033[91m{format_hms(bfs_time)}\033[0m; ", end="")
+            
+            if mcts_dis <= bfs_dis:
+                print(f"IMT_BFS finds \033[92m{mcts_dis}\033[0m", end="")
+            else:
+                print(f"IMT_BFS finds \033[91m{mcts_dis}\033[0m", end="")
+            if mcts_time <= bfs_time:
+                print(f"-path in \033[92m{format_hms(mcts_time)}\033[0m")
+            else:
+                print(f"-path in \033[91m{format_hms(mcts_time)}\033[0m")
+
+            num_tests = num_tests + 1
+        seed = seed + 1
+
+if __name__ == "__main__":
+    import multiprocessing as mp
+    mp.freeze_support()
+    mp.set_start_method("spawn", force=True)
+    main()
