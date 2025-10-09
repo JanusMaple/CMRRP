@@ -539,9 +539,11 @@ class TreeNode:
 
     # Whether this node contains all goal configuration angles
     def is_goal(self):
-        if len(self.cgf_manager.survival_idx) <= 0:
-            return True
-        return False
+        if not len(self.cgf_manager.survival_idx) <= 0:
+            return False
+        if not self.tree.is_target_GMRC(self.get_id_ethnicity()[0]):
+            return False
+        return True
     
     # Release grasps that does not appear in goal configuration
     def extend_to_goal(self):
@@ -779,6 +781,8 @@ class Tree:
         self.ed_estimator = ed_estimator
         self.id_verdict = id_verdict
 
+        self.target_gmrc_id = self.id_verdict.get_identity(tar_gmrc)
+
         if not TreeNode.is_grouping:
             child_group_feature = None
         else:
@@ -790,6 +794,10 @@ class Tree:
                         mediocrity = 0,
                         tree = self,
                         group_feature = child_group_feature)
+        
+    # Decide whether a GMRC shape is target GMRC shape
+    def is_target_GMRC(self, id: torch.tensor):
+        return self.id_verdict.is_identical(id, self.target_gmrc_id)
 
     # Decide whether a GMRC shape has been reached by the tree or not
     def is_duplicated_gmrc(self, gmrc: GMRC, cgf_manager: CGFManager):
@@ -939,7 +947,7 @@ class IDVerdict:
         self.device = device
 
     # Get the identifier (hash value) using GGNN
-    def get_id_ethnicity(self, gmrc: GMRC, cgf_manager: CGFManager):
+    def get_identity(self, gmrc: GMRC):
         x, edge_index, cyclic_neighbors, neighbor_phis, neighbor_num = \
             gmrc.get_representation()
         with torch.inference_mode():
@@ -955,6 +963,12 @@ class IDVerdict:
                 neighbor_num.to(self.device))
 
             graph_feat = self.ggnn_pooling(x_gnnout_feat, torch.tensor([x.size()[0]]))
+
+        return graph_feat
+
+    # Get the identifier and ethnicity of a (gmrc, cgf_manager) pair
+    def get_id_ethnicity(self, gmrc: GMRC, cgf_manager: CGFManager):
+        graph_feat = self.get_identity(gmrc)
 
         grsp_ang_parity = int(np.sum(np.abs(gmrc.grsp_angs)) / np.pi * 180)
 
