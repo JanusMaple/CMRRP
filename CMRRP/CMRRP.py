@@ -401,6 +401,19 @@ class ParOptimizer:
                 pass
         ParOptimizer.pool = None
 
+    @staticmethod
+    def cleanup_all_pools() -> None:
+        if ParOptimizer.pool is not None:
+            try:
+                ParOptimizer.pool.shutdown(wait=True, cancel_futures=True)
+            except Exception:
+                try:
+                    ParOptimizer.pool.shutdown(wait=False, cancel_futures=True)
+                except Exception:
+                    pass
+            finally:
+                ParOptimizer.pool = None
+
 # A search tree node contains: 1. a unique gmrc shape; 2. a partial correspondence
 class TreeNode:
     mediocrity_tolerance = 0

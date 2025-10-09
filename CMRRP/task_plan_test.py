@@ -150,9 +150,6 @@ def main():
             file_name = f"/{m}_{seed}.pt"
             torch.save(data, dir_name + file_name)
 
-            num_tests = num_tests + 1
-            seed = seed + 1
-
             print(f"Round-{num_tests}; Seed: {seed}; ", end="")
             if bfs_path is None:
                 print("IMT_BFS \033[91mFailed\033[0m; ", end="")
@@ -177,6 +174,8 @@ def main():
                     print(f"-path in \033[92m{format_hms(mcts_time)}\033[0m")
                 else:
                     print(f"-path in \033[91m{format_hms(mcts_time)}\033[0m")
+            num_tests = num_tests + 1
+            seed = seed + 1
         else:
             seed = seed + 1
 
@@ -202,6 +201,8 @@ def main():
     print(f"MCTS takes \033[96m{format_hms(mcts_mean)}±{format_hms(mcts_std)}\033[0m", end="")
     print(f" with Success Rate: \033[96m{mcts_succ_rate * 100:.1f}%\033[0m", end="")
     print(f"; Optimal Rate: \033[96m{optimal_times / both_solved_times * 100:.1f}%\033[0m")
+
+    ParOptimizer.cleanup_all_pools()
 
 if __name__ == "__main__":
     import multiprocessing as mp
