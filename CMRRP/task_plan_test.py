@@ -121,7 +121,8 @@ def main():
     m = args.m
     n = args.n
     time_budget = args.t
-    dir_name = args.dir
+    dir_name = args.dir + "/task_plan_results"
+    os.makedirs(dir_name, exist_ok=True)
     seed = 100000
     num_tests = 0
     bfs_times = []
@@ -134,17 +135,18 @@ def main():
         gmrc_2 = GMRC.get_random_configuration(m=m, seed=1000000+seed)
         if gmrc_1.successfully_spawned and gmrc_2.successfully_spawned:
             bfs_path, bfs_dis, bfs_time = plan_and_time(
-                cmrrp, gmrc_1, gmrc_2, "IMT_BFS", time_budget)
+                cmrrp, gmrc_1.copy(), gmrc_2.copy(), "IMT_BFS", time_budget)
             bfs_distances.append(bfs_dis)
             bfs_times.append(bfs_time)
 
             mcts_path, mcts_dis, mcts_time = plan_and_time(
-                cmrrp, gmrc_1, gmrc_2, "MCTS", time_budget)
+                cmrrp, gmrc_1.copy(), gmrc_2.copy(), "MCTS", time_budget)
             mcts_distances.append(mcts_dis)
             mcts_times.append(mcts_time)
 
             data = ((bfs_path, bfs_dis, bfs_time),
-                    (mcts_path, mcts_dis, mcts_time))
+                    (mcts_path, mcts_dis, mcts_time),
+                    gmrc_1, gmrc_2)
             file_name = f"/{m}_{seed}.pt"
             torch.save(data, dir_name + file_name)
 
