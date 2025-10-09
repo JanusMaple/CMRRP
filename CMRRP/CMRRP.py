@@ -835,17 +835,20 @@ class Tree:
         return True
 
     # Traditional BFS that pushs the front by 1 g-depth with fixed mediocrity tolerance
-    def push_front(self):
+    def push_front(self, time_budget):
         goal_node = None
         max_g_depth_before = self.max_g_depth
+        start_time = time.time()
         for node in self.nodes_at_depth[-1]:
             goal_node = node.expand()
             if goal_node is not None:
                 goal_node = goal_node.extend_to_goal()
                 break
+            if time.time() - start_time > time_budget:
+                raise RuntimeError("Running Out of Time Budget!")
         max_g_depth_after = self.max_g_depth
         if max_g_depth_before == max_g_depth_after:
-            raise RuntimeError("Can not further expand any leaf nodes!")
+            raise RuntimeError("Can Not Further Expand Any Leaf Nodes!")
         num_new_nodes = len(self.nodes_at_depth[-1])
         if not Tree.suppress_print:
             print(f"Find {num_new_nodes} nodes at depth {len(self.nodes_at_depth) - 1}")
@@ -877,6 +880,8 @@ class Tree:
                         print(f"\r    Find {num_nodes} nodes at depth {current_depth}", 
                             end = "        \n")
                     return goal_node
+                if time.time() - start_time > time_budget:
+                    return None
             num_nodes = len(self.nodes_at_depth[current_depth])
             if not Tree.suppress_print:
                 print(f"\r    Find {num_nodes} nodes at depth {current_depth}",
@@ -888,8 +893,6 @@ class Tree:
                 cur_mt = TreeNode.mediocrity_tolerance
                 if not Tree.suppress_print:
                     print(f"\33[93mMediocrity Tolerance: {cur_mt}\33[0m")
-            if time.time() - start_time > time_budget:
-                return None
 
 # Edit Distance Estimator
 class EDEstimator:
@@ -1321,15 +1324,12 @@ class CMRRP:
         cgf_manager = CGFManager(gmrc_2.get_Gamma_final())
         self.tree = Tree(gmrc_1, cgf_manager, gmrc_2, self.ed_estimator, self.id_verdict)
 
-        start_time = time.time()
         if method == "BFS":
             TreeNode.is_grouping = False
             while True:
-                node = self.tree.push_front()
+                node = self.tree.push_front(time_budget)
                 if node is not None:
                     break
-                if time.time() - start_time > time_budget:
-                    return None
         elif method == "IMT_BFS":
             TreeNode.is_grouping = False
             node = self.tree.explore(time_budget)
