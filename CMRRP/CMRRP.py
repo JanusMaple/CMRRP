@@ -571,6 +571,13 @@ class TreeNode:
                 break
         return child.extend_to_goal()
     
+    # Strip irrelevant virables that is tree-related but not path-related
+    def strip2path(self):
+        self.parent = None
+        self.children = None
+        self.tree = None
+        return self
+    
     # Get the child of the node after a release action
     @staticmethod
     def get_release_child(node: TreeNode, release_action):

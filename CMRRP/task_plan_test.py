@@ -64,6 +64,7 @@ def plan_and_time(cmrrp: CMRRP, gmrc_1: GMRC, gmrc_2: GMRC, method: str, time_bu
     path = cmrrp.plan(gmrc_1, gmrc_2, method, time_budget, False)
     end_time = time.time()
     if path is not None:
+        path = [node.strip2path() for node in path]
         g_dis = path[-1].g_depth
         delta_time = end_time - start_time
     else:
@@ -71,7 +72,7 @@ def plan_and_time(cmrrp: CMRRP, gmrc_1: GMRC, gmrc_2: GMRC, method: str, time_bu
         delta_time = None
     return (path, g_dis, delta_time)
 
-def print_info(bfs_path, bfs_dis, bfs_time, mcts_path, mcts_dis, mcts_time):
+def print_single_info(bfs_path, bfs_dis, bfs_time, mcts_path, mcts_dis, mcts_time):
     if bfs_path is None:
         print("IMT_BFS \033[91mFailed\033[0m; ", end="")
     else:
@@ -95,6 +96,29 @@ def print_info(bfs_path, bfs_dis, bfs_time, mcts_path, mcts_dis, mcts_time):
             print(f"-path in \033[92m{format_hms(mcts_time)}\033[0m")
         else:
             print(f"-path in \033[91m{format_hms(mcts_time)}\033[0m")
+
+def print_comprehensive_info(bfs_times, bfs_distances, mcts_times, mcts_distances):
+    bfs_succ_times = [dt for dt in bfs_times if dt is not None]
+    bfs_mean = np.mean(np.array(bfs_succ_times))
+    bfs_std = np.std(np.array(bfs_succ_times))
+    bfs_succ_rate = len(bfs_succ_times) / len(bfs_distances)
+    print(f"IMT_BFS takes \033[96m{format_hms(bfs_mean)}±{format_hms(bfs_std)}\033[0m", end="")
+    print(f" with Success Rate: \033[96m{bfs_succ_rate * 100:.1f}%\033[0m")
+    mcts_succ_times = [dt for dt in mcts_times if dt is not None]
+    mcts_mean = np.mean(np.array(mcts_succ_times))
+    mcts_std = np.std(np.array(mcts_succ_times))
+    mcts_succ_rate = len(mcts_succ_times) / len(mcts_distances)
+    optimal_times = 0
+    both_solved_times = 0
+    for bfs_dis, mcts_dis in zip(bfs_distances, mcts_distances):
+        if bfs_dis is not None and mcts_dis is not None:
+            both_solved_times = both_solved_times + 1
+            if mcts_dis <= bfs_dis:
+                optimal_times = optimal_times + 1
+
+    print(f"MCTS takes \033[96m{format_hms(mcts_mean)}±{format_hms(mcts_std)}\033[0m", end="")
+    print(f" with Success Rate: \033[96m{mcts_succ_rate * 100:.1f}%\033[0m", end="")
+    print(f"; Optimal Rate: \033[96m{optimal_times / both_solved_times * 100:.1f}%\033[0m")
 
 def main():
     parser = argparse.ArgumentParser(
@@ -141,28 +165,8 @@ def main():
             bfs_distances.append(bfs_dis)
             mcts_times.append(mcts_time)
             mcts_distances.append(mcts_dis)
-            print_info(bfs_path, bfs_dis, bfs_time, mcts_path, mcts_dis, mcts_time)
-        bfs_succ_times = [dt for dt in bfs_times if dt is not None]
-        bfs_mean = np.mean(np.array(bfs_succ_times))
-        bfs_std = np.std(np.array(bfs_succ_times))
-        bfs_succ_rate = len(bfs_succ_times) / len(bfs_distances)
-        print(f"IMT_BFS takes \033[96m{format_hms(bfs_mean)}±{format_hms(bfs_std)}\033[0m", end="")
-        print(f" with Success Rate: \033[96m{bfs_succ_rate * 100:.1f}%\033[0m")
-        mcts_succ_times = [dt for dt in mcts_times if dt is not None]
-        mcts_mean = np.mean(np.array(mcts_succ_times))
-        mcts_std = np.std(np.array(mcts_succ_times))
-        mcts_succ_rate = len(mcts_succ_times) / len(mcts_distances)
-        optimal_times = 0
-        both_solved_times = 0
-        for bfs_dis, mcts_dis in zip(bfs_distances, mcts_distances):
-            if bfs_dis is not None and mcts_dis is not None:
-                both_solved_times = both_solved_times + 1
-                if mcts_dis <= bfs_dis:
-                    optimal_times = optimal_times + 1
-
-        print(f"MCTS takes \033[96m{format_hms(mcts_mean)}±{format_hms(mcts_std)}\033[0m", end="")
-        print(f" with Success Rate: \033[96m{mcts_succ_rate * 100:.1f}%\033[0m", end="")
-        print(f"; Optimal Rate: \033[96m{optimal_times / both_solved_times * 100:.1f}%\033[0m")
+            print_single_info(bfs_path, bfs_dis, bfs_time, mcts_path, mcts_dis, mcts_time)
+        print_comprehensive_info(bfs_times, bfs_distances, mcts_times, mcts_distances)
         return
     elif args.generate_mode:
         print("\033[36mGenerate Mode\033[0m \033[92mOn\033[0m")
@@ -237,35 +241,12 @@ def main():
             torch.save(data, dir_name + file_name)
 
             print(f"Round-{num_tests}; Seed: {seed}; ", end="")
-            print_info(bfs_path, bfs_dis, bfs_time, mcts_path, mcts_dis, mcts_time)
+            print_single_info(bfs_path, bfs_dis, bfs_time, mcts_path, mcts_dis, mcts_time)
             num_tests = num_tests + 1
             seed = seed + 1
         else:
             seed = seed + 1
-
-    bfs_succ_times = [dt for dt in bfs_times if dt is not None]
-    bfs_mean = np.mean(np.array(bfs_succ_times))
-    bfs_std = np.std(np.array(bfs_succ_times))
-    bfs_succ_rate = len(bfs_succ_times) / n
-    print(f"IMT_BFS takes \033[96m{format_hms(bfs_mean)}±{format_hms(bfs_std)}\033[0m", end="")
-    print(f" with Success Rate: \033[96m{bfs_succ_rate * 100:.1f}%\033[0m")
-
-    mcts_succ_times = [dt for dt in mcts_times if dt is not None]
-    mcts_mean = np.mean(np.array(mcts_succ_times))
-    mcts_std = np.std(np.array(mcts_succ_times))
-    mcts_succ_rate = len(mcts_succ_times) / n
-    optimal_times = 0
-    both_solved_times = 0
-    for bfs_dis, mcts_dis in zip(bfs_distances, mcts_distances):
-        if bfs_dis is not None and mcts_dis is not None:
-            both_solved_times = both_solved_times + 1
-            if mcts_dis <= bfs_dis:
-                optimal_times = optimal_times + 1
-
-    print(f"MCTS takes \033[96m{format_hms(mcts_mean)}±{format_hms(mcts_std)}\033[0m", end="")
-    print(f" with Success Rate: \033[96m{mcts_succ_rate * 100:.1f}%\033[0m", end="")
-    print(f"; Optimal Rate: \033[96m{optimal_times / both_solved_times * 100:.1f}%\033[0m")
-
+    print_comprehensive_info(bfs_times, bfs_distances, mcts_times, mcts_distances)
     ParOptimizer.cleanup_all_pools()
 
 if __name__ == "__main__":
