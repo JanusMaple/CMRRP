@@ -227,6 +227,8 @@ def main():
         gmrc_1 = GMRC.get_random_configuration(m=m, seed=seed)
         gmrc_2 = GMRC.get_random_configuration(m=m, seed=1000000+seed)
         if gmrc_1.successfully_spawned and gmrc_2.successfully_spawned:
+            print(f"Round-{num_tests}; Seed: {seed}; ", end="", flush=True)
+
             bfs_path, bfs_dis, bfs_time = plan_and_time(
                 cmrrp, gmrc_1.copy(), gmrc_2.copy(), "IMT_BFS", time_budget)
             bfs_distances.append(bfs_dis)
@@ -243,7 +245,6 @@ def main():
             file_name = f"/{m}_{seed}.pt"
             torch.save(data, dir_name + file_name)
 
-            print(f"Round-{num_tests}; Seed: {seed}; ", end="")
             print_single_info(bfs_path, bfs_dis, bfs_time, mcts_path, mcts_dis, mcts_time)
             num_tests = num_tests + 1
             seed = seed + 1

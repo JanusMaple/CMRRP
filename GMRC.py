@@ -112,7 +112,7 @@ class GMRC(EMRC):
                     self.update_angs_from_x(x)
                 self.update_all_module_geometry()           # Update all geometries
                 self.update_all_module_collider()           # Update all colliders
-                if not self.is_collision_detected():
+                if not cannot_be_docked and not self.is_collision_detected():
                     break                                   # Until no collision
             else:                                           # Cannot break the loop
                 if not GMRC.suppress_spawn_err:
