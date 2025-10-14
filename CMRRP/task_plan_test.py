@@ -166,7 +166,10 @@ def main():
             mcts_times.append(mcts_time)
             mcts_distances.append(mcts_dis)
             print_single_info(bfs_path, bfs_dis, bfs_time, mcts_path, mcts_dis, mcts_time)
-        print_comprehensive_info(bfs_times, bfs_distances, mcts_times, mcts_distances)
+        if len(bfs_distances) > 0:
+            print_comprehensive_info(bfs_times, bfs_distances, mcts_times, mcts_distances)
+        else:
+            print("\033[91mNo Data Found ...\033[0m")
         return
     elif args.generate_mode:
         print("\033[36mGenerate Mode\033[0m \033[92mOn\033[0m")

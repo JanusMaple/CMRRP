@@ -25,7 +25,7 @@ from EMRC import EMRC
 # Convention: alpha: head starting angle; beta: bend angle; gamma: grasp angle
 class GMRC(EMRC):
     mdl_ang_cap = np.pi         # 180 degree, must be in (0, 180)
-    grsp_ang_cap = 2            # 115 degree, must be in (0, 180)
+    grsp_ang_cap = 1.658        # 95 degree, must be in (0, 180)
 
     radius_ratio = 1 / 10       # The body radius ratio for a module
 
