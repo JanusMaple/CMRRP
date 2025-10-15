@@ -965,16 +965,24 @@ class IDVerdict:
 
             x_degree_feat = self.ggnn_embedding(x_oh)
 
-            x_gnnout_feat = self.ggnn(
+            x_gnnout_feat_1 = self.ggnn(
                 x_degree_feat,
                 edge_index.to(self.device),
                 cyclic_neighbors.to(self.device),
                 neighbor_phis.to(self.device),
                 neighbor_num.to(self.device))
+            
+            x_gnnout_feat_2 = self.ggnn(
+                x_gnnout_feat_1,
+                edge_index.to(self.device),
+                cyclic_neighbors.to(self.device),
+                neighbor_phis.to(self.device),
+                neighbor_num.to(self.device))
 
-            graph_feat = self.ggnn_pooling(x_gnnout_feat, torch.tensor([x.size()[0]]))
+            graph_feat_1 = self.ggnn_pooling(x_gnnout_feat_1, torch.tensor([x.size()[0]]))
+            graph_feat_2 = self.ggnn_pooling(x_gnnout_feat_2, torch.tensor([x.size()[0]]))
 
-        return graph_feat
+        return torch.cat([graph_feat_1, graph_feat_2], dim = 0)
 
     # Get the identifier and ethnicity of a (gmrc, cgf_manager) pair
     def get_id_ethnicity(self, gmrc: GMRC, cgf_manager: CGFManager):
@@ -989,7 +997,7 @@ class IDVerdict:
 
     def is_identical(self, id_1: torch.tensor, id_2: torch.tensor):
         graph_feat_diff = id_1 - id_2
-        distance = graph_feat_diff.norm(p=2, dim=-1)
+        distance = graph_feat_diff.norm(p=2)
         if distance >= IDVerdict.thd:
             return False        
         return True
@@ -1145,7 +1153,10 @@ class MCTreeNode:
             elif num_curse > 0:
                 promising_score = MCTree.promising_score_curse
             elif num_mediocre > 0:
-                promising_score = MCTree.promising_score_mediocre
+                if to_construct - constructed > 1:
+                    promising_score = MCTree.promising_score_mediocre
+                else:
+                    promising_score = 0
             else:
                 return 0
         else:
@@ -1319,7 +1330,7 @@ class CMRRP:
             else:
                 gpr_list = [grip * 3]
             for gpr in gpr_list:
-                ang = int(1e2 * np.abs(gmrc_2.grsp_angs[gpr] / np.pi * 180))
+                ang = round(1e2 * np.abs(gmrc_2.grsp_angs[gpr] / np.pi * 180))
                 if ang in target_angles and not target_angles[ang] == grip:
                     IDVerdict.strict_mode = True
                 target_angles[ang] = grip
