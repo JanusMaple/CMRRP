@@ -657,6 +657,8 @@ class TreeNode:
                         bc_cgf_manager = node.cgf_manager.copy()
                         bc_cgf_manager.get_angle(gf, gt, idx)
                         bc_gmrc = mid_gmrc.copy()
+                        if not bc_gmrc.is_2_cycle(-1):
+                            bc_gmrc.modify_grsp_ang(grip, ang)
                         if not TreeNode.is_grouping:
                             child_group_feature = None
                         else:
@@ -778,7 +780,7 @@ class Tree:
     def __init__(self, gmrc: GMRC, cgf_manager: CGFManager, tar_gmrc: GMRC,
                  ed_estimator: EDEstimator, id_verdict: IDVerdict):
         self.nodes_at_depth: list[TreeNode] = [[]]
-        self.ethinicity2id = dict()
+        self.ethnicity2id = dict()
 
         self.max_g_depth = 0
         self.target_gmrc = tar_gmrc
@@ -809,9 +811,9 @@ class Tree:
     # Decide whether a GMRC shape has been reached by the tree or not
     def is_duplicated_gmrc(self, gmrc: GMRC, cgf_manager: CGFManager):
         gmrc_id, ethnicity = self.id_verdict.get_id_ethnicity(gmrc, cgf_manager)
-        if not ethnicity in self.ethinicity2id:
+        if not ethnicity in self.ethnicity2id:
             return False
-        for id in self.ethinicity2id[ethnicity]:
+        for id in self.ethnicity2id[ethnicity]:
             if self.id_verdict.is_identical(id, gmrc_id):
                 return True
         return False
@@ -828,12 +830,14 @@ class Tree:
             temp = temp.parent
         if not skip:                    # Skip cursed or new-relieved-from-curse nodes
             node_id, ethnicity = node.get_id_ethnicity()
-            if not ethnicity in self.ethinicity2id:
-                self.ethinicity2id[ethnicity] = [node_id]
+            if not ethnicity in self.ethnicity2id:
+                self.ethnicity2id[ethnicity] = [node_id]
             else:
-                for id in self.ethinicity2id[ethnicity]:
+                for id in self.ethnicity2id[ethnicity]:
                     if self.id_verdict.is_identical(id, node_id):
                         return False                                # Prevent revisiting
+                else:
+                    self.ethnicity2id[ethnicity].append(node_id)
 
         while node.g_depth > self.max_g_depth:
             self.nodes_at_depth.append([])
