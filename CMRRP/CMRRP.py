@@ -856,9 +856,11 @@ class Tree:
                 goal_node = goal_node.extend_to_goal()
                 break
             if time.time() - start_time > time_budget:
+                CMRRP.finish_mode = 2
                 raise RuntimeError("Running Out of Time Budget!")
         max_g_depth_after = self.max_g_depth
         if max_g_depth_before == max_g_depth_after:
+            CMRRP.finish_mode = 1
             raise RuntimeError("Can Not Further Expand Any Leaf Nodes!")
         num_new_nodes = len(self.nodes_at_depth[-1])
         if not Tree.suppress_print:
@@ -869,6 +871,7 @@ class Tree:
     def explore(self, time_budget):
         TreeNode.mediocrity_tolerance = 0
         current_depth = 0
+        last_MT_max_depth = 1
         if not Tree.suppress_print:
             print(f"\33[93mMediocrity Tolerance: {TreeNode.mediocrity_tolerance}\33[0m")
         start_time = time.time()
@@ -892,6 +895,7 @@ class Tree:
                             end = "        \n")
                     return goal_node
                 if time.time() - start_time > time_budget:
+                    CMRRP.finish_mode = 2
                     return None
             num_nodes = len(self.nodes_at_depth[current_depth])
             if not Tree.suppress_print:
@@ -899,7 +903,11 @@ class Tree:
                     end = "        \n")
             current_depth = current_depth + 1
             if current_depth >= len(self.nodes_at_depth):
+                if len(self.nodes_at_depth) <= last_MT_max_depth:
+                    CMRRP.finish_mode = 1
+                    return None
                 TreeNode.mediocrity_tolerance = TreeNode.mediocrity_tolerance + 1
+                last_MT_max_depth = len(self.nodes_at_depth)
                 current_depth = 0
                 cur_mt = TreeNode.mediocrity_tolerance
                 if not Tree.suppress_print:
@@ -1106,6 +1114,8 @@ class MCTreeNode:
     # Select a node that 1. leads to a leaf node or 2. to be expanded and added
     def select(self) -> MCTreeNode:
         ucb_values = []
+        if len(self.survival_children) <= 0:
+            return None
         for i in self.survival_children:
             ucb_values.append(self.children[i].get_UCB(self.n))
         ucb_array = np.array(ucb_values)
@@ -1281,7 +1291,7 @@ class MCTree:
 
     def select(self):                               # Select a node
         node = self.root.select()
-        while node.is_expanded:
+        while node is not None and node.is_expanded:
             new_node = node.select()
             while new_node is None:
                 new_node = node.select()
@@ -1292,6 +1302,9 @@ class MCTree:
         start_time = time.time()
         while True:
             node = self.select()
+            if node is None:
+                CMRRP.finish_mode = 1
+                return None
             node.expand()
             Q = node.simulate()
             node.backpropagate(Q)
@@ -1299,9 +1312,11 @@ class MCTree:
             if self.is_goal_found:
                 return self.goal_node.extend_to_goal()
             if time.time() - start_time > time_budget:
+                CMRRP.finish_mode = 2
                 return None
 
 class CMRRP:
+    finish_mode = 0     # 0: Found Solution; 1: No Solution; 2: Timeout
     def __init__(self,
                  gg: GGNN.GGNN = None,
                  ge: GGNN.DegreeEmbedding = None,
@@ -1326,20 +1341,6 @@ class CMRRP:
         GMRC.suppress_action_err = True
         assert gmrc_1.m == gmrc_2.m
 
-        # IDVerdict.strict_mode = False
-        # target_angles = dict()
-        # for grip in range(len(gmrc_2.grippers) // 3):
-        #     if gmrc_2.is_grip_w[grip]:
-        #         gpr_list = [grip * 3, grip * 3 + 1, grip * 3 + 2]
-        #     else:
-        #         gpr_list = [grip * 3]
-        #     for gpr in gpr_list:
-        #         ang = round(1e2 * np.abs(gmrc_2.grsp_angs[gpr] / np.pi * 180))
-        #         if ang in target_angles and not target_angles[ang] == grip:
-        #             IDVerdict.strict_mode = True
-        #         target_angles[ang] = grip
-        # if IDVerdict.strict_mode and is_print:
-        #     print("\033[95mDetected Duplicated Angles, Turning on IDVerdict Strict Mode\033[0m")
         Tree.suppress_print = not is_print
 
         CGFManager.m = gmrc_1.m
@@ -1370,4 +1371,5 @@ class CMRRP:
             node = node.parent
             path.append(node)
         path.reverse()
+        CMRRP.finish_mode = 0
         return path
