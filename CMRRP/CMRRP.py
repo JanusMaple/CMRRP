@@ -1003,7 +1003,9 @@ class IDVerdict:
         grsp_ang_parity = int(np.sum(np.abs(gmrc.grsp_angs)) / np.pi * 180)
 
         if IDVerdict.strict_mode:
-            return (graph_feat, (grsp_ang_parity, int(cgf_manager.built_grip_parity)))
+            return (graph_feat, (grsp_ang_parity,
+                                 int(cgf_manager.built_grip_parity),
+                                 tuple(cgf_manager.survival_idx)))
         else:
             return (graph_feat, grsp_ang_parity)
 
