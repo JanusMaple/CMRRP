@@ -229,8 +229,11 @@ def main():
         if gmrc_1.successfully_spawned and gmrc_2.successfully_spawned:
             print(f"Round-{num_tests}; Seed: {seed}; ", end="", flush=True)
 
-            bfs_path, bfs_dis, bfs_time = plan_and_time(
+            if m <= 5:
+                bfs_path, bfs_dis, bfs_time = plan_and_time(
                 cmrrp, gmrc_1.copy(), gmrc_2.copy(), "IMT_BFS", time_budget)
+            else:
+                bfs_path, bfs_dis, bfs_time = (None, 100, time_budget)
             if CMRRP.finish_mode == 1:          # If No Solution Exists
                 seed = seed + 1
                 print("\033[33mSkipped: No Solution\033[0m")

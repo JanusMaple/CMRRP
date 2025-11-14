@@ -418,7 +418,7 @@ class ParOptimizer:
 class TreeNode:
     mediocrity_tolerance = 0
     is_grouping = False
-    max_workers = 12
+    max_workers = 24
 
     def __init__(self, gmrc: GMRC, cgf_manager: CGFManager, 
                  parent: TreeNode = None, g_depth: int = 0,
