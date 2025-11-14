@@ -699,14 +699,16 @@ class TMRC:
         n_c = 0
 
         # Connect all grips to guarantee connectivity
-        for i in range(w + v - 1):
+        for i in range(1, w + v):
             from_list = []
+            for j in range(i):
+                for k in range(3):
+                    if grippers[3 * j + k] == -1:
+                        from_list.append(3 * j + k)
             to_list = []
-            for j in range(3):
-                if grippers[3 * i + j] == -1:
-                    from_list.append(3 * i + j)
-                if grippers[3 * (i + 1) + j] == -1:
-                    to_list.append(3 * (i + 1) + j)
+            for k in range(3):
+                if grippers[3 * i + k] == -1:
+                    to_list.append(3 * i + k)
             from_idx = rng.choice(from_list, 1)
             to_idx = rng.choice(to_list, 1)
             grippers[from_idx] = to_idx
