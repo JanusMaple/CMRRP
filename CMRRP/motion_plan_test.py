@@ -95,6 +95,36 @@ for i, gmrc_pair in tqdm.tqdm(zip(range(len(gmrc_pairs)), gmrc_pairs)):
     mp_paths.append(planner.plan(1800, 20))
 
 """ Plot as GIF and save it with path to disk """
+xmin, xmax, ymin, ymax = float('inf'), float('-inf'), float('inf'), float('-inf')
+ 
+for gmrc_pair, mp_path in zip(gmrc_pairs, mp_paths):
+    plot_gmrc = gmrc_pair[0].copy()
+    for way_pnt in mp_path:
+        plot_gmrc.bend_angs = way_pnt.detach().cpu().numpy()
+        plot_gmrc.update_all_module_geometry()
+        plot_gmrc.update_all_module_collider()
+ 
+        # harvest extents from geometries and colliders
+        for i in range(plot_gmrc.m):
+            # module_geometries[i] assumed iterable of arrays of shape (N,2) or similar
+            for geom in plot_gmrc.module_geometries[i]:
+                arr = np.asarray(geom)
+                if arr.ndim == 2 and arr.shape[1] >= 2:
+                    xmin = min(xmin, np.min(arr[:,0])); xmax = max(xmax, np.max(arr[:,0]))
+                    ymin = min(ymin, np.min(arr[:,1])); ymax = max(ymax, np.max(arr[:,1]))
+ 
+            # colliders (each 'line' has .xy)
+            for line in plot_gmrc.module_colliders[i][1].geoms:
+                x, y = line.xy
+                xmin = min(xmin, np.min(x)); xmax = max(xmax, np.max(x))
+                ymin = min(ymin, np.min(y)); ymax = max(ymax, np.max(y))
+ 
+# add a small padding so strokes/labels don't touch the edge
+dx, dy = (xmax - xmin), (ymax - ymin)
+pad = 0.05 * max(dx, dy) if max(dx, dy) > 0 else 1.0
+X_LIM = (xmin - pad, xmax + pad)
+Y_LIM = (ymin - pad, ymax + pad)
+ 
 print("Motion Plan Completed; Save GIF to disk...")
 fig, gif_ax = plt.subplots()
 gif_frames = []
@@ -107,6 +137,8 @@ for gmrc_pair, mp_path in zip(gmrc_pairs, mp_paths):
 
         gif_ax.clear()
         gif_ax.set_aspect('equal')
+        gif_ax.set_xlim(*X_LIM)
+        gif_ax.set_ylim(*Y_LIM)
         gif_ax.axis('off')
         leaf_count = plot_gmrc.w + plot_gmrc.v
         for i in range(plot_gmrc.m):
