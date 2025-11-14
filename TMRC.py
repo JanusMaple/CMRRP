@@ -738,9 +738,16 @@ class TMRC:
         
         # Generate a random sequence for pairing stubs
         # Step 1: Arrage all stubs with brothers
+        """ NOTE: stubs2c pairs potential stubs for connection at 2i and 2i + 1"""
         stubs2c = -1 * np.ones((len(stubs) + 1) // 2 * 2, dtype=int)
         available_pairs = list(range((len(stubs) + 1) // 2))
-        for grip in grips_w_dpcs:
+        grip_idx = 0
+        while grip_idx < len(grips_w_dpcs):
+            if len(available_pairs) < 2:
+                stubs2c = -1 * np.ones((len(stubs) + 1) // 2 * 2, dtype=int)
+                available_pairs = list(range((len(stubs) + 1) // 2))
+                grip_idx = 0
+            grip = grips_w_dpcs[grip_idx]
             pairs = rng.choice(available_pairs, 2, replace=False)
             for i in range(len(pairs)):         # From 0 to 1
                 if stubs2c[2 * pairs[i]] == -1: # If both slots in the pair are empty
@@ -748,6 +755,7 @@ class TMRC:
                 else:                           # If only one slot left in this pair
                     stubs2c[2 * pairs[i] + 1] = grip2stub[grip][i]
                     available_pairs.remove(pairs[i])
+            grip_idx = grip_idx + 1
         # Step2: Arrange all stubs that are only children
         stubsleft = np.where(stubs2c == -1)[0]  # Find indexes for all remaining slots
         stubsleft = rng.permutation(stubsleft)
