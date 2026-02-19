@@ -27,12 +27,12 @@ class GMRC(EMRC):
     mdl_ang_cap = np.pi         # 180 degree, must be in (0, 180)
     grsp_ang_cap = 1.658        # 95 degree, must be in (0, 180)
 
-    radius_ratio = 1 / 10       # The body radius ratio for a module
+    radius_ratio = 44.2/481.421 # The body radius ratio for a module
 
     num_seg_lens = 5            # Number of line segments for a module
-    _mdl_seg_lens = np.array([126.383, 58, 58, 58, 126.383], dtype=np.float64)
+    _mdl_seg_lens = np.array([153.7105, 58, 58, 58, 153.7105], dtype=np.float64)
     mdl_seg_lens = _mdl_seg_lens / np.sum(_mdl_seg_lens)    # Five segments
-    plg_axs_place =  np.array([0.77, 0.5, 0.5, 0.5, 0.23], dtype=np.float64)
+    plg_axs_place =  np.array([0.50, 0.5, 0.5, 0.5, 0.50], dtype=np.float64)
     cls_exp_ratio = 0.01        # Collision exemption ratio
 
     drs_dis_thd = 0.01          # Dangerous Distance Threshold
@@ -1050,7 +1050,7 @@ class GMRC(EMRC):
         if self.module_geometries == {}:
             return
 
-        fig, ax = plt.subplots(figsize=(6, 6), dpi=600)
+        fig, ax = plt.subplots(figsize=(6, 6), dpi=100)
         ax.set_aspect('equal')
         ax.axis('off')
 
