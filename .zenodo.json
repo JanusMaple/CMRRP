@@ -1,0 +1,23 @@
+{
+  "title": "CMRRP: Continuum Modular Robot Reconfiguration Planning",
+  "creators": [
+    {
+      "name": "Huang, Zhefeng",
+      "affiliation": "Georgia Institute of Technology"
+    }
+  ],
+  "description": "Implementation of a self-reconfiguration planning framework for Modular Self-Reconfigurable Continuum Robots (MSRCRs), including topology, morphology, and shape representations, task planning, and motion planning.",
+  "upload_type": "software",
+  "access_right": "open",
+  "license": "MIT",
+  "keywords": [
+    "modular robots",
+    "self-reconfiguration",
+    "continuum robots",
+    "motion planning",
+    "task planning",
+    "Atlas-RRT",
+    "Monte Carlo tree search"
+  ],
+  "language": "eng"
+}
