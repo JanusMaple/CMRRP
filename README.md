@@ -245,3 +245,7 @@ python task_plan_test.py --m 4 --n 100 --t 600.0 --s 100000
 python task_plan_test.py --m 5 --n 100 --t 100000.0 --s 100000
 python task_plan_test.py --m 6 --analyze_mode
 ```
+
+## License
+
+This project is licensed under the MIT License. See the [LICENSE](LICENSE) file for details.
