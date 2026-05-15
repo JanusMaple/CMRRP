@@ -1,5 +1,5 @@
 """
-Compare Plan Speed Between IMT_BFS and MCTS
+Compare Plan Speed Between IAB_BFS and MCTS
 """
 
 import sys
@@ -74,12 +74,12 @@ def plan_and_time(cmrrp: CMRRP, gmrc_1: GMRC, gmrc_2: GMRC, method: str, time_bu
 
 def print_single_info(bfs_path, bfs_dis, bfs_time, mcts_path, mcts_dis, mcts_time):
     if bfs_path is None:
-        print("IMT_BFS \033[91mFailed\033[0m; ", end="")
+        print("IAB_BFS \033[91mFailed\033[0m; ", end="")
     else:
         if mcts_dis is None or bfs_dis <= mcts_dis:
-            print(f"IMT_BFS finds \033[92m{bfs_dis}\033[0m", end="")
+            print(f"IAB_BFS finds \033[92m{bfs_dis}\033[0m", end="")
         else:
-            print(f"IMT_BFS finds \033[91m{bfs_dis}\033[0m", end="")
+            print(f"IAB_BFS finds \033[91m{bfs_dis}\033[0m", end="")
         if mcts_time is None or bfs_time <= mcts_time:
             print(f"-path in \033[92m{format_hms(bfs_time)}\033[0m; ", end="")
         else:
@@ -102,7 +102,7 @@ def print_comprehensive_info(bfs_times, bfs_distances, mcts_times, mcts_distance
     bfs_mean = np.mean(np.array(bfs_succ_times))
     bfs_std = np.std(np.array(bfs_succ_times))
     bfs_succ_rate = len(bfs_succ_times) / len(bfs_distances)
-    print(f"IMT_BFS takes \033[96m{format_hms(bfs_mean)}±{format_hms(bfs_std)}\033[0m", end="")
+    print(f"IAB_BFS takes \033[96m{format_hms(bfs_mean)}±{format_hms(bfs_std)}\033[0m", end="")
     print(f" with Success Rate: \033[96m{bfs_succ_rate * 100:.1f}%\033[0m")
     mcts_succ_times = [dt for dt in mcts_times if dt is not None]
     mcts_mean = np.mean(np.array(mcts_succ_times))
@@ -231,7 +231,7 @@ def main():
 
             if m <= 5:
                 bfs_path, bfs_dis, bfs_time = plan_and_time(
-                cmrrp, gmrc_1.copy(), gmrc_2.copy(), "IMT_BFS", time_budget)
+                cmrrp, gmrc_1.copy(), gmrc_2.copy(), "IAB_BFS", time_budget)
             else:
                 bfs_path, bfs_dis, bfs_time = (None, 100, time_budget)
             if CMRRP.finish_mode == 1:          # If No Solution Exists

@@ -381,9 +381,10 @@ class ParOptimizer:
 
     @staticmethod
     def make_pool(max_workers):
+        ctx_name = "fork" if os.name == "posix" else "spawn"
         return ProcessPoolExecutor(
             max_workers=max_workers,
-            mp_context=mp.get_context("spawn"),
+            mp_context=mp.get_context(ctx_name),
             initializer=ParOptimizer._init_worker
         )
 
@@ -1335,7 +1336,7 @@ class CMRRP:
     """
     Methods:
         BFS: Simple breadth first search with fixed mediocrity tolerance
-        IMT_BFS: BFS with Iterative Mediocrity Tolerance
+        IAB_BFS: BFS with Iterative Mediocrity Tolerance
         MCTS: Single Monte Carlo Tree Search with Hierarchical Grouping Nodes
     """
     def plan(self, gmrc_1: GMRC, gmrc_2: GMRC, method = "BFS",
@@ -1355,7 +1356,7 @@ class CMRRP:
                 node = self.tree.push_front(time_budget)
                 if node is not None:
                     break
-        elif method == "IMT_BFS":
+        elif method == "IAB_BFS":
             TreeNode.is_grouping = False
             node = self.tree.explore(time_budget)
             if node is None:

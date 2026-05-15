@@ -49,12 +49,12 @@ if filename is None:
 
 data = torch.load(dirname + "/task_plan_results/" + filename + ".pt",
                   weights_only=False)
-if method == "IMT_BFS":
+if method == "IAB_BFS":
     path = data[0][0]
 elif method == "MCTS":
     path = data[1][0]
 else:
-    raise ValueError("Please Provide Valid Method Name: IMT_BFS/MCTS")
+    raise ValueError("Please Provide Valid Method Name: IAB_BFS/MCTS")
 
 m = int(filename[:-7])
 seed = int(filename[-6:])
